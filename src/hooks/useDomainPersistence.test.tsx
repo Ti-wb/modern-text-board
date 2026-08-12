@@ -105,6 +105,36 @@ describe("useDomainPersistence", () => {
     });
   });
 
+  it("persists both toolbar position axes in one preference write", () => {
+    const initial = createProps({ initialPreferencesRevision: 2 });
+    const { rerender } = renderHook(
+      (props: HookProps) => useDomainPersistence(props),
+      { initialProps: initial }
+    );
+    const preferences = {
+      ...initial.preferences,
+      toolbar: {
+        ...initial.preferences.toolbar,
+        edge: "top" as const,
+        offsetRatio: 0.15,
+        verticalOffsetRatio: 0.35
+      }
+    };
+
+    rerender({ ...initial, preferences });
+    act(() => { vi.advanceTimersByTime(300); });
+
+    expect(stored<PreferencesStorageEnvelopeV1>(STORAGE_KEYS.preferences)).toMatchObject({
+      revision: 3,
+      preferences: {
+        toolbar: {
+          offsetRatio: 0.15,
+          verticalOffsetRatio: 0.35
+        }
+      }
+    });
+  });
+
   it("flushes pending workspace and preference changes synchronously on pagehide", () => {
     const initial = createProps();
     const { rerender } = renderHook(

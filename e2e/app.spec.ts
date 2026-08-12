@@ -6,6 +6,15 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 const CHROMIUM_QR_PROJECT = "chromium-1024x768";
 const CHROMIUM_REGULAR_PROJECT = "chromium-1024x768";
 const CHROMIUM_COMPACT_PROJECT = "chromium-390x844";
+const TOOLBAR_PROJECTS = new Set([
+  CHROMIUM_REGULAR_PROJECT,
+  CHROMIUM_COMPACT_PROJECT,
+]);
+
+interface Point {
+  x: number;
+  y: number;
+}
 
 function skipUnlessChromiumQrProject(testInfo: TestInfo): void {
   test.skip(
@@ -19,6 +28,65 @@ function skipUnlessProject(testInfo: TestInfo, projectName: string): void {
     testInfo.project.name !== projectName,
     `Runs only in the ${projectName} project`,
   );
+}
+
+function skipUnlessToolbarProject(testInfo: TestInfo): void {
+  test.skip(
+    !TOOLBAR_PROJECTS.has(testInfo.project.name),
+    `Runs only in the ${[...TOOLBAR_PROJECTS].join(" and ")} projects`,
+  );
+}
+
+async function toolbarCenter(page: Page): Promise<Point> {
+  const bounds = await page.locator(".toolbar-shell").boundingBox();
+  expect(bounds).not.toBeNull();
+  if (!bounds) throw new Error("Toolbar does not have measurable bounds");
+  return {
+    x: bounds.x + bounds.width / 2,
+    y: bounds.y + bounds.height / 2,
+  };
+}
+
+async function dragToolbarPointerTo(page: Page, pointerTarget: Point): Promise<Point> {
+  await dismissPwaBanner(page);
+  const toolbarShell = page.locator(".toolbar-shell");
+  const grip = toolbarShell.locator(".grip-button");
+  const gripBounds = await grip.boundingBox();
+  expect(gripBounds).not.toBeNull();
+  if (!gripBounds) throw new Error("Toolbar grip does not have measurable bounds");
+
+  await grip.hover();
+  await page.mouse.down();
+  await expect(toolbarShell).toHaveClass(/is-dragging/);
+  await page.mouse.move(pointerTarget.x, pointerTarget.y, { steps: 8 });
+  await page.mouse.up();
+  await expect(toolbarShell).not.toHaveClass(/is-dragging/);
+  return toolbarCenter(page);
+}
+
+async function dragToolbarCenterTo(page: Page, target: Point): Promise<Point> {
+  const toolbarShell = page.locator(".toolbar-shell");
+  const grip = toolbarShell.locator(".grip-button");
+  const shellBounds = await toolbarShell.boundingBox();
+  const gripBounds = await grip.boundingBox();
+  expect(shellBounds).not.toBeNull();
+  expect(gripBounds).not.toBeNull();
+  if (!shellBounds || !gripBounds) {
+    throw new Error("Toolbar does not have measurable bounds");
+  }
+
+  const pointerOffset = {
+    x:
+      gripBounds.x + gripBounds.width / 2 -
+      (shellBounds.x + shellBounds.width / 2),
+    y:
+      gripBounds.y + gripBounds.height / 2 -
+      (shellBounds.y + shellBounds.height / 2),
+  };
+  return dragToolbarPointerTo(page, {
+    x: target.x + pointerOffset.x,
+    y: target.y + pointerOffset.y,
+  });
 }
 
 async function expectWithinViewport(page: Page, selector: string): Promise<void> {
@@ -39,6 +107,19 @@ async function dismissPwaBanner(page: Page): Promise<void> {
   if (!await banner.isVisible().catch(() => false)) return;
   const dismiss = banner.getByRole("button").last();
   if (await dismiss.isVisible().catch(() => false)) await dismiss.click();
+}
+
+async function openSettings(page: Page) {
+  await page.getByRole("button", { name: /更多工具|More tools/ }).click();
+  const moreDialog = page.locator("#tool-panel-more");
+  await expect(moreDialog).toBeVisible();
+  await moreDialog.locator('button.menu-row:has(img[src$="/settings.svg"])').click();
+
+  const settingsDialog = page.locator(
+    '[role="dialog"][aria-labelledby="settings-panel-title"]',
+  );
+  await expect(settingsDialog).toBeVisible();
+  return settingsDialog;
 }
 
 async function enableQrCode(page: Page, payload: string): Promise<void> {
@@ -130,7 +211,7 @@ test("adds a page and switches with accessible controls", async ({ page }) => {
   await expect(page.locator(".page-indicator")).toContainText(/2/);
 });
 
-test("compact layout uses a bottom dock and QR panel", async ({ page }) => {
+test("compact layout keeps its floating toolbar and QR panel usable", async ({ page }) => {
   await expect(page.locator(".toolbar-shell")).toBeVisible();
   const payload = "https://example.com/台北";
   await enableQrCode(page, payload);
@@ -149,49 +230,147 @@ test("low-height compact QR stays square and contained", async ({ page }, testIn
   await expectQrSizing(page, payload, 168);
 });
 
-test("regular toolbar stays contained after drag and auto-hide remains recoverable", async ({
+test("toolbar drags freely, clamps, persists, and idles smoothly", async ({
   page,
 }, testInfo) => {
-  skipUnlessProject(testInfo, CHROMIUM_REGULAR_PROJECT);
+  skipUnlessToolbarProject(testInfo);
   await dismissPwaBanner(page);
 
   const toolbarShell = page.locator(".toolbar-shell");
-  const grip = toolbarShell.locator(".grip-button");
-  const gripBounds = await grip.boundingBox();
-  expect(gripBounds).not.toBeNull();
-  if (!gripBounds) return;
+  const viewport = page.viewportSize();
+  expect(viewport).not.toBeNull();
+  if (!viewport) return;
 
-  await page.mouse.move(
-    gripBounds.x + gripBounds.width / 2,
-    gripBounds.y + gripBounds.height / 2,
+  const initial = await toolbarCenter(page);
+  const desired = {
+    x: viewport.width * (testInfo.project.name === CHROMIUM_COMPACT_PROJECT ? 0.508 : 0.68),
+    y: viewport.height * 0.38,
+  };
+  const freelyMoved = await dragToolbarCenterTo(page, desired);
+  expect(Math.abs(freelyMoved.x - initial.x)).toBeGreaterThan(
+    testInfo.project.name === CHROMIUM_COMPACT_PROJECT ? 2 : 80,
   );
-  await page.mouse.down();
-  await page.mouse.move(24, 48, { steps: 8 });
-  await page.mouse.up();
+  expect(Math.abs(freelyMoved.y - initial.y)).toBeGreaterThan(100);
+  expect(freelyMoved.x).toBeCloseTo(desired.x, 0);
+  expect(freelyMoved.y).toBeCloseTo(desired.y, 0);
 
-  await expect(toolbarShell).toHaveClass(/edge-top/);
-  await expect(page.locator(".app-shell")).toHaveClass(/toolbar-at-top/);
+  await dragToolbarPointerTo(page, { x: 0, y: 0 });
+  await expectWithinViewport(page, ".toolbar-shell");
+  await dragToolbarPointerTo(page, {
+    x: viewport.width - 1,
+    y: viewport.height - 1,
+  });
   await expectWithinViewport(page, ".toolbar-shell");
 
-  await toolbarShell.locator(".tool-button").last().click();
-  const moreDialog = page.locator("#tool-panel-more");
-  await expect(moreDialog).toBeVisible();
-  await moreDialog.locator('button.menu-row:has(img[src$="/settings.svg"])').click();
+  const persistedBeforeReload = await dragToolbarCenterTo(page, desired);
+  await expect.poll(async () => page.evaluate(() => {
+    const raw = localStorage.getItem("simple-white-board.preferences");
+    if (!raw) return null;
+    const stored = JSON.parse(raw) as {
+      preferences?: { toolbar?: { verticalOffsetRatio?: number } };
+    };
+    return stored.preferences?.toolbar?.verticalOffsetRatio ?? null;
+  }), { timeout: 2_000 }).toBeCloseTo(desired.y / viewport.height, 2);
 
-  const settingsDialog = page.locator('[role="dialog"][aria-labelledby="settings-panel-title"]');
-  await expect(settingsDialog).toBeVisible();
-  const autoHideSwitch = settingsDialog.getByRole("switch").first();
-  if (await autoHideSwitch.getAttribute("aria-checked") !== "true") {
-    await autoHideSwitch.click();
-  }
-  await page.keyboard.press("Escape");
-  await expect(settingsDialog).toBeHidden();
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(toolbarShell).toBeVisible();
+  await expect.poll(async () => (await toolbarCenter(page)).x).toBeCloseTo(
+    persistedBeforeReload.x,
+    0,
+  );
+  await expect.poll(async () => (await toolbarCenter(page)).y).toBeCloseTo(
+    persistedBeforeReload.y,
+    0,
+  );
 
+  await page.clock.install();
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await dismissPwaBanner(page);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   const canvas = page.getByRole("main");
-  await canvas.click({ position: { x: 512, y: 384 } });
-  await expect(toolbarShell).toHaveClass(/is-hidden/, { timeout: 4_500 });
-  await canvas.click({ position: { x: 512, y: 384 } });
-  await expect(toolbarShell).not.toHaveClass(/is-hidden/);
+  await canvas.click({ position: { x: 12, y: viewport.height / 2 } });
+  await expect(toolbarShell).not.toHaveClass(/is-idle/);
+
+  const opacityTransition = await toolbarShell.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      duration: Number.parseFloat(style.transitionDuration) * 1_000,
+      property: style.transitionProperty,
+    };
+  });
+  expect(opacityTransition.property).toContain("opacity");
+  expect(opacityTransition.duration).toBeGreaterThan(0);
+  expect(opacityTransition.duration).toBeLessThanOrEqual(500);
+
+  await page.clock.fastForward(9_000);
+  await expect(toolbarShell).not.toHaveClass(/is-idle/);
+  await page.clock.fastForward(1_000);
+  await expect(toolbarShell).toHaveClass(/is-idle/);
+  await expect(toolbarShell).toHaveCSS("opacity", "0.18");
+
+  await canvas.click({ position: { x: 12, y: viewport.height / 2 } });
+  await expect(toolbarShell).not.toHaveClass(/is-idle/);
+  await expect(toolbarShell).toHaveCSS("opacity", "1");
+});
+
+test("settings switches keep fixed geometry while toggling", async ({
+  page,
+}, testInfo) => {
+  skipUnlessToolbarProject(testInfo);
+  await dismissPwaBanner(page);
+  const settingsDialog = await openSettings(page);
+  await expectWithinViewport(
+    page,
+    '[role="dialog"][aria-labelledby="settings-panel-title"]',
+  );
+
+  const settingSwitch = settingsDialog.getByRole("switch").nth(1);
+  const geometry = await settingSwitch.evaluate((element) => {
+    const button = element.getBoundingClientRect();
+    const before = getComputedStyle(element, "::before");
+    const after = getComputedStyle(element, "::after");
+    return {
+      button: { height: button.height, width: button.width },
+      before: {
+        height: Number.parseFloat(before.height),
+        left: Number.parseFloat(before.left),
+        top: Number.parseFloat(before.top),
+        width: Number.parseFloat(before.width),
+      },
+      after: {
+        height: Number.parseFloat(after.height),
+        left: Number.parseFloat(after.left),
+        top: Number.parseFloat(after.top),
+        transitionDuration: Number.parseFloat(after.transitionDuration) * 1_000,
+        width: Number.parseFloat(after.width),
+      },
+    };
+  });
+
+  expect(geometry.button.width).toBeCloseTo(48, 1);
+  expect(geometry.button.height).toBeCloseTo(44, 1);
+  expect(geometry.before).toMatchObject({
+    height: 28,
+    left: 2,
+    top: 8,
+    width: 44,
+  });
+  expect(geometry.after).toMatchObject({
+    height: 24,
+    left: 4,
+    top: 10,
+    width: 24,
+  });
+  expect(geometry.after.transitionDuration).toBeGreaterThan(0);
+  expect(geometry.after.transitionDuration).toBeLessThanOrEqual(500);
+
+  await expect(settingSwitch).toHaveAttribute("aria-checked", "false");
+  await settingSwitch.click();
+  await expect(settingSwitch).toHaveAttribute("aria-checked", "true");
+  await expect.poll(async () => settingSwitch.evaluate((element) => {
+    const transform = getComputedStyle(element, "::after").transform;
+    return transform === "none" ? 0 : new DOMMatrixReadOnly(transform).m41;
+  })).toBeCloseTo(16, 1);
 });
 
 test("compact sheet remains usable across dynamic orientation changes", async ({

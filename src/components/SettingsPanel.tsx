@@ -26,7 +26,6 @@ export interface SettingsPwaStatus {
 
 export interface SettingsPanelProps {
   locale: Locale;
-  toolbarAutoHide: boolean;
   keepScreenAwake: boolean;
   pauseAnimations: boolean;
   wakeLockStatus: Pick<
@@ -41,7 +40,6 @@ export interface SettingsPanelProps {
   exportDisabled?: boolean;
   onClose: () => void;
   onLocaleChange: (locale: Locale) => void;
-  onToolbarAutoHideChange: (enabled: boolean) => void;
   onKeepScreenAwakeChange: (enabled: boolean) => void;
   onPauseAnimationsChange: (enabled: boolean) => void;
   onExport: () => void;
@@ -59,8 +57,6 @@ interface Copy {
   display: string;
   traditionalChinese: string;
   english: string;
-  toolbarAutoHide: string;
-  toolbarAutoHideHelp: string;
   keepAwake: string;
   keepAwakeHelp: string;
   pauseAnimations: string;
@@ -105,8 +101,6 @@ const COPY: Record<Locale, Copy> = {
     display: "顯示與操作",
     traditionalChinese: "繁體中文",
     english: "English",
-    toolbarAutoHide: "自動隱藏工具列",
-    toolbarAutoHideHelp: "閒置三秒後隱藏；點一下畫布即可叫回。",
     keepAwake: "保持螢幕常亮",
     keepAwakeHelp: "只在展示模式且頁面可見時嘗試啟用。",
     pauseAnimations: "暫停所有動態",
@@ -181,8 +175,6 @@ const COPY: Record<Locale, Copy> = {
     display: "Display & controls",
     traditionalChinese: "繁體中文",
     english: "English",
-    toolbarAutoHide: "Auto-hide toolbar",
-    toolbarAutoHideHelp: "Hide after three idle seconds; tap the board to bring it back.",
     keepAwake: "Keep screen awake",
     keepAwakeHelp: "Only attempted while presenting and this page is visible.",
     pauseAnimations: "Pause all motion",
@@ -292,7 +284,6 @@ function wakeStatusText(
 
 export function SettingsPanel({
   locale,
-  toolbarAutoHide,
   keepScreenAwake,
   pauseAnimations,
   wakeLockStatus,
@@ -304,7 +295,6 @@ export function SettingsPanel({
   exportDisabled = false,
   onClose,
   onLocaleChange,
-  onToolbarAutoHideChange,
   onKeepScreenAwakeChange,
   onPauseAnimationsChange,
   onExport,
@@ -354,19 +344,6 @@ export function SettingsPanel({
 
         <div class="panel-divider" />
         <span class="section-label">{copy.display}</span>
-
-        <div class="setting-row">
-          <div class="setting-copy">
-            <strong>{copy.toolbarAutoHide}</strong>
-            <small id="settings-auto-hide-help">{copy.toolbarAutoHideHelp}</small>
-          </div>
-          <SettingSwitch
-            checked={toolbarAutoHide}
-            describedBy="settings-auto-hide-help"
-            label={copy.toolbarAutoHide}
-            onChange={onToolbarAutoHideChange}
-          />
-        </div>
 
         <div class="setting-row">
           <div class="setting-copy">

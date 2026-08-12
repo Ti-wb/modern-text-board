@@ -321,7 +321,14 @@ export function preferencesReducer(
     case "preferences/set-locale":
       return { ...preferences, locale: action.locale };
     case "preferences/set-toolbar-edge":
-      return { ...preferences, toolbar: { ...preferences.toolbar, edge: action.edge } };
+      return {
+        ...preferences,
+        toolbar: {
+          ...preferences.toolbar,
+          edge: action.edge,
+          verticalOffsetRatio: action.edge === "top" ? 0 : 1,
+        },
+      };
     case "preferences/set-toolbar-offset":
       if (!Number.isFinite(action.offsetRatio)) return preferences;
       return {
@@ -331,6 +338,25 @@ export function preferencesReducer(
           offsetRatio: clamp(action.offsetRatio, 0, 1),
         },
       };
+    case "preferences/set-toolbar-position": {
+      if (
+        !Number.isFinite(action.offsetRatio) ||
+        !Number.isFinite(action.verticalOffsetRatio)
+      ) {
+        return preferences;
+      }
+      const offsetRatio = clamp(action.offsetRatio, 0, 1);
+      const verticalOffsetRatio = clamp(action.verticalOffsetRatio, 0, 1);
+      return {
+        ...preferences,
+        toolbar: {
+          ...preferences.toolbar,
+          edge: verticalOffsetRatio < 0.5 ? "top" : "bottom",
+          offsetRatio,
+          verticalOffsetRatio,
+        },
+      };
+    }
     case "preferences/set-toolbar-auto-hide":
       return {
         ...preferences,

@@ -1,14 +1,15 @@
 import type { JSX } from "preact";
-import type { Locale, Theme, ToolbarEdge } from "../domain/types";
+import type { Locale, Theme } from "../domain/types";
 import { Icon } from "./Icon";
 
 export type ToolPanelKind = "font" | "color" | "align" | "marquee" | "more";
 
 export interface ToolbarProps {
   locale: Locale;
-  edge: ToolbarEdge;
-  offsetRatio: number;
-  hidden?: boolean;
+  positionX: number;
+  positionY: number;
+  idle?: boolean;
+  dragging?: boolean;
   activePanel: ToolPanelKind | null;
   theme: Theme;
   bold: boolean;
@@ -16,7 +17,11 @@ export interface ToolbarProps {
   onToggleTheme: () => void;
   onTogglePanel: (panel: ToolPanelKind) => void;
   onToggleBold: () => void;
+  onActivate?: () => void;
+  onHoverChange?: (hovered: boolean) => void;
+  onFocusChange?: (focused: boolean) => void;
   onGripPointerDown?: JSX.PointerEventHandler<HTMLButtonElement>;
+  onGripLostPointerCapture?: JSX.PointerEventHandler<HTMLButtonElement>;
 }
 
 const COPY = {
@@ -56,9 +61,10 @@ function panelButtonState(activePanel: ToolPanelKind | null, panel: ToolPanelKin
 
 export function Toolbar({
   locale,
-  edge,
-  offsetRatio,
-  hidden = false,
+  positionX,
+  positionY,
+  idle = false,
+  dragging = false,
   activePanel,
   theme,
   bold,
@@ -66,10 +72,13 @@ export function Toolbar({
   onToggleTheme,
   onTogglePanel,
   onToggleBold,
+  onActivate,
+  onHoverChange,
+  onFocusChange,
   onGripPointerDown,
+  onGripLostPointerCapture,
 }: ToolbarProps) {
   const copy = COPY[locale];
-  const boundedOffset = Math.min(0.96, Math.max(0.04, offsetRatio));
   const font = panelButtonState(activePanel, "font");
   const color = panelButtonState(activePanel, "color");
   const align = panelButtonState(activePanel, "align");
@@ -78,13 +87,24 @@ export function Toolbar({
 
   return (
     <div
-      class={`toolbar-shell edge-${edge}${hidden ? " is-hidden" : ""}`}
-      style={`--toolbar-offset: ${boundedOffset}`}
+      class={`toolbar-shell${idle ? " is-idle" : ""}${dragging ? " is-dragging" : ""}`}
+      onBlurCapture={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+          onFocusChange?.(false);
+        }
+      }}
+      onFocusCapture={() => onFocusChange?.(true)}
+      onPointerDown={onActivate}
+      onPointerEnter={(event) => onHoverChange?.(event.pointerType === "mouse")}
+      onPointerLeave={() => onHoverChange?.(false)}
+      style={`--toolbar-x: ${positionX}px; --toolbar-y: ${positionY}px`}
     >
       <nav aria-label={copy.toolbar} class="toolbar">
         <button
           aria-label={copy.move}
           class="grip-button"
+          onLostPointerCapture={onGripLostPointerCapture}
           onPointerDown={onGripPointerDown}
           title={copy.move}
           type="button"

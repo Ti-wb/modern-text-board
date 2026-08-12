@@ -43,6 +43,38 @@ describe("local persistence", () => {
     expect(storage.values.size).toBe(0);
   });
 
+  it("hydrates legacy toolbar preferences without a vertical ratio", () => {
+    const storage = new MemoryStorage();
+    const legacyPreferences = {
+      ...createDefaultPreferences("en"),
+      toolbar: {
+        edge: "top",
+        offsetRatio: 0.2,
+        autoHide: true,
+      },
+    };
+    storage.setItem(
+      STORAGE_KEYS.preferences,
+      JSON.stringify({
+        format: "simple-white-board/local-preferences",
+        schemaVersion: 1,
+        revision: 3,
+        savedAt: "2026-08-12T00:00:00.000Z",
+        writerId: "legacy-tab",
+        preferences: legacyPreferences,
+      }),
+    );
+
+    const hydrated = hydrateDomainData("zh-TW", storage);
+
+    expect(hydrated.preferencesLoad.status).toBe("ok");
+    expect(hydrated.preferencesRevision).toBe(3);
+    expect(hydrated.preferences.toolbar).toEqual({
+      ...legacyPreferences.toolbar,
+      verticalOffsetRatio: 0,
+    });
+  });
+
   it("saves validated envelopes and increments revision only on success", () => {
     const storage = new MemoryStorage();
     const workspace = createDefaultWorkspace("en", "page-1");
@@ -222,6 +254,48 @@ describe("local persistence", () => {
       workspaceRevision: 9,
       preferencesRevision: 11,
       autosaveAllowed: true,
+    });
+  });
+
+  it("imports legacy preferences and persists the normalized toolbar position", () => {
+    const storage = new MemoryStorage();
+    const workspace = createDefaultWorkspace("en", "legacy-import");
+    const exported = createExport(
+      workspace,
+      createDefaultPreferences("en"),
+      new Date("2026-08-12T12:00:00.000Z"),
+    );
+    const legacyExport = {
+      ...exported,
+      preferences: {
+        ...exported.preferences,
+        toolbar: {
+          edge: "bottom",
+          offsetRatio: 0.65,
+          autoHide: false,
+        },
+      },
+    };
+
+    const result = commitImport(
+      legacyExport as unknown as Parameters<typeof commitImport>[0],
+      { storage, writerId: "import-tab" },
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      preferences: {
+        preferences: {
+          toolbar: {
+            offsetRatio: 0.65,
+            verticalOffsetRatio: 1,
+          },
+        },
+      },
+    });
+    expect(hydrateDomainData("en", storage).preferences.toolbar).toMatchObject({
+      offsetRatio: 0.65,
+      verticalOffsetRatio: 1,
     });
   });
 });

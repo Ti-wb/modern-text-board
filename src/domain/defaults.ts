@@ -81,6 +81,7 @@ export function createDefaultPreferences(locale: Locale = "zh-TW"): PreferencesV
     toolbar: {
       edge: "bottom",
       offsetRatio: 0.5,
+      verticalOffsetRatio: 1,
       autoHide: false,
     },
     keepScreenAwake: false,

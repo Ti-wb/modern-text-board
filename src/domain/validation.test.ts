@@ -105,6 +105,53 @@ describe("domain validation", () => {
     expect(validateWorkspace(workspace)).toMatchObject({ success: false });
   });
 
+  it("validates the toolbar vertical ratio", () => {
+    const preferences = createDefaultPreferences();
+
+    for (const verticalOffsetRatio of [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      -0.01,
+      1.01,
+    ]) {
+      expect(
+        validatePreferences({
+          ...preferences,
+          toolbar: { ...preferences.toolbar, verticalOffsetRatio },
+        }),
+      ).toMatchObject({ success: false });
+    }
+  });
+
+  it("normalizes legacy toolbar preferences that do not have a vertical ratio", () => {
+    const preferences = createDefaultPreferences();
+    const top = validatePreferences({
+      ...preferences,
+      toolbar: {
+        edge: "top",
+        offsetRatio: 0.25,
+        autoHide: false,
+      },
+    });
+    const bottom = validatePreferences({
+      ...preferences,
+      toolbar: {
+        edge: "bottom",
+        offsetRatio: 0.75,
+        autoHide: true,
+      },
+    });
+
+    expect(top).toMatchObject({
+      success: true,
+      data: { toolbar: { verticalOffsetRatio: 0 } },
+    });
+    expect(bottom).toMatchObject({
+      success: true,
+      data: { toolbar: { verticalOffsetRatio: 1 } },
+    });
+  });
+
   it("returns useful errors for invalid JSON, formats, future versions, and huge files", () => {
     expect(parseExportJson("not-json")).toMatchObject({
       success: false,

@@ -49,6 +49,7 @@ export interface PreferencesV1 {
   toolbar: {
     edge: ToolbarEdge;
     offsetRatio: number;
+    verticalOffsetRatio: number;
     autoHide: boolean;
   };
   keepScreenAwake: boolean;
@@ -132,6 +133,11 @@ export type PreferencesAction =
   | { type: "preferences/set-locale"; locale: Locale }
   | { type: "preferences/set-toolbar-edge"; edge: ToolbarEdge }
   | { type: "preferences/set-toolbar-offset"; offsetRatio: number }
+  | {
+      type: "preferences/set-toolbar-position";
+      offsetRatio: number;
+      verticalOffsetRatio: number;
+    }
   | { type: "preferences/set-toolbar-auto-hide"; autoHide: boolean }
   | { type: "preferences/set-keep-awake"; keepScreenAwake: boolean }
   | { type: "preferences/set-pause-animations"; pauseAnimations: boolean };

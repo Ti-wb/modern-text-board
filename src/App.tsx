@@ -38,6 +38,34 @@ import {
 
 type Overlay = "qr" | "pages" | "settings" | null;
 
+const TOOLBAR_IDLE_DELAY_MS = 10_000;
+
+interface ViewportMetrics {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+interface ToolbarDragState {
+  pointerId: number;
+  pointerOffsetX: number;
+  pointerOffsetY: number;
+  grip: HTMLButtonElement;
+  onMove: (event: PointerEvent) => void;
+  onEnd: (event: PointerEvent) => void;
+}
+
+function getViewportMetrics(): ViewportMetrics {
+  const viewport = window.visualViewport;
+  return {
+    top: Math.max(0, viewport?.offsetTop ?? 0),
+    left: Math.max(0, viewport?.offsetLeft ?? 0),
+    width: Math.max(1, viewport?.width ?? window.innerWidth),
+    height: Math.max(1, viewport?.height ?? window.innerHeight),
+  };
+}
+
 function contrastRatio(foreground: string, background: string): number {
   const channel = (value: number) => {
     const normalized = value / 255;
@@ -79,11 +107,16 @@ export function App() {
   const [fitOverflow, setFitOverflow] = useState(false);
   const [customColorDraft, setCustomColorDraft] = useState("#007AFF");
   const [customColorError, setCustomColorError] = useState<string | undefined>();
-  const [toolbarHidden, setToolbarHidden] = useState(false);
+  const [toolbarIdle, setToolbarIdle] = useState(false);
+  const [toolbarDragging, setToolbarDragging] = useState(false);
+  const [toolbarHovered, setToolbarHovered] = useState(false);
+  const [toolbarFocused, setToolbarFocused] = useState(false);
+  const [viewport, setViewport] = useState<ViewportMetrics>(getViewportMetrics);
   const [documentHidden, setDocumentHidden] = useState(document.visibilityState === "hidden");
   const [toast, setToast] = useState<{ message: string; error?: boolean } | null>(null);
-  const hideTimerRef = useRef<number | null>(null);
-  const dragStateRef = useRef<{ pointerId: number } | null>(null);
+  const idleTimerRef = useRef<number | null>(null);
+  const dragStateRef = useRef<ToolbarDragState | null>(null);
+  const viewportRef = useRef(viewport);
   const page = getActivePage(workspace);
   const pageIndex = workspace.pages.findIndex((item) => item.id === page.id);
   const locale = preferences.locale;
@@ -148,17 +181,35 @@ export function App() {
     if (result.outcome !== "native") notify(t("fullscreen.unavailable"));
   }, [exitPresentation, notify, presentation, t]);
 
-  const showToolbar = useCallback(() => {
-    setToolbarHidden(false);
-    if (hideTimerRef.current !== null) window.clearTimeout(hideTimerRef.current);
-    if (preferences.toolbar.autoHide && !editing && !panel && !overlay && !shortcutsOpen && !presentation) {
-      hideTimerRef.current = window.setTimeout(() => {
-        if (!dragStateRef.current && !document.querySelector(".toolbar-shell :focus-visible")) {
-          setToolbarHidden(true);
-        }
-      }, 3000);
+  const toolbarIdleBlocked =
+    editing ||
+    panel !== null ||
+    overlay !== null ||
+    shortcutsOpen ||
+    importPreview !== null ||
+    presentation ||
+    toolbarDragging ||
+    toolbarHovered ||
+    toolbarFocused ||
+    documentHidden;
+
+  const activateToolbar = useCallback(() => {
+    if (idleTimerRef.current !== null) {
+      window.clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
     }
-  }, [editing, overlay, panel, preferences.toolbar.autoHide, presentation, shortcutsOpen]);
+    setToolbarIdle(false);
+    if (toolbarIdleBlocked) return;
+    idleTimerRef.current = window.setTimeout(() => {
+      idleTimerRef.current = null;
+      if (
+        !dragStateRef.current &&
+        !document.querySelector(".toolbar-shell")?.matches(":focus-within")
+      ) {
+        setToolbarIdle(true);
+      }
+    }, TOOLBAR_IDLE_DELAY_MS);
+  }, [toolbarIdleBlocked]);
 
   useEffect(() => {
     applyDocumentLocale(locale);
@@ -168,12 +219,20 @@ export function App() {
   useEffect(() => {
     const visualViewport = window.visualViewport;
     const updateVisualViewport = () => {
-      const height = visualViewport?.height ?? window.innerHeight;
-      const top = Math.max(0, visualViewport?.offsetTop ?? 0);
-      const left = Math.max(0, visualViewport?.offsetLeft ?? 0);
-      document.documentElement.style.setProperty("--visual-viewport-height", `${height}px`);
-      document.documentElement.style.setProperty("--visual-viewport-top", `${top}px`);
-      document.documentElement.style.setProperty("--visual-viewport-left", `${left}px`);
+      const next = getViewportMetrics();
+      viewportRef.current = next;
+      setViewport((current) =>
+        current.top === next.top &&
+        current.left === next.left &&
+        current.width === next.width &&
+        current.height === next.height
+          ? current
+          : next
+      );
+      document.documentElement.style.setProperty("--visual-viewport-height", `${next.height}px`);
+      document.documentElement.style.setProperty("--visual-viewport-width", `${next.width}px`);
+      document.documentElement.style.setProperty("--visual-viewport-top", `${next.top}px`);
+      document.documentElement.style.setProperty("--visual-viewport-left", `${next.left}px`);
     };
     updateVisualViewport();
     visualViewport?.addEventListener("resize", updateVisualViewport);
@@ -188,6 +247,10 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    viewportRef.current = viewport;
+  }, [viewport]);
+
   useEffect(() => subscribeFullscreen((snapshot) => {
     setPresentation(snapshot.presentationActive || snapshot.nativeActive);
   }), []);
@@ -199,14 +262,15 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    showToolbar();
+    activateToolbar();
     return () => {
-      if (hideTimerRef.current !== null) window.clearTimeout(hideTimerRef.current);
+      if (idleTimerRef.current !== null) window.clearTimeout(idleTimerRef.current);
     };
-  }, [showToolbar, workspace.activePageId]);
+  }, [activateToolbar, workspace.activePageId]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      activateToolbar();
       if (event.key === "Escape" && (event.isComposing || event.keyCode === 229)) return;
       if (event.key === "Escape") {
         if (editing || shortcutsOpen || importPreview || overlay || panel) closeTransientUi();
@@ -217,7 +281,6 @@ export function App() {
       if (event.key === "?") {
         event.preventDefault();
         setShortcutsOpen(true);
-        showToolbar();
         return;
       }
       if (editing || shortcutsOpen || importPreview || overlay || panel) return;
@@ -243,37 +306,85 @@ export function App() {
         event.preventDefault();
         dispatchWorkspace({ type: "page/next" });
       }
-      showToolbar();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [closeTransientUi, editing, exitPresentation, importPreview, overlay, page, panel, presentation, shortcutsOpen, showToolbar, togglePresentation]);
+  }, [activateToolbar, closeTransientUi, editing, exitPresentation, importPreview, overlay, page, panel, presentation, shortcutsOpen, togglePresentation]);
+
+  const finishToolbarDrag = useCallback((pointerId?: number) => {
+    const drag = dragStateRef.current;
+    if (!drag || (pointerId !== undefined && drag.pointerId !== pointerId)) return;
+    dragStateRef.current = null;
+    window.removeEventListener("pointermove", drag.onMove);
+    window.removeEventListener("pointerup", drag.onEnd);
+    window.removeEventListener("pointercancel", drag.onEnd);
+    try {
+      if (drag.grip.hasPointerCapture?.(drag.pointerId)) {
+        drag.grip.releasePointerCapture(drag.pointerId);
+      }
+    } catch {
+      // Pointer capture may already be released by the browser.
+    }
+    setToolbarDragging(false);
+    setToolbarIdle(false);
+  }, []);
+
+  useEffect(() => () => {
+    const drag = dragStateRef.current;
+    if (!drag) return;
+    window.removeEventListener("pointermove", drag.onMove);
+    window.removeEventListener("pointerup", drag.onEnd);
+    window.removeEventListener("pointercancel", drag.onEnd);
+  }, []);
 
   const handleGripPointerDown: JSX.PointerEventHandler<HTMLButtonElement> = (event) => {
-    if (window.matchMedia("(max-width: 639px), (max-height: 519px)").matches) return;
+    if (event.button !== 0 || dragStateRef.current) return;
+    event.preventDefault();
+    activateToolbar();
+    const shell = event.currentTarget.closest<HTMLElement>(".toolbar-shell");
+    const bounds = shell?.getBoundingClientRect();
+    if (!bounds) return;
+
     const pointerId = event.pointerId;
-    dragStateRef.current = { pointerId };
-    event.currentTarget.setPointerCapture(pointerId);
+    const grip = event.currentTarget;
+    const pointerOffsetX = event.clientX - (bounds.left + bounds.width / 2);
+    const pointerOffsetY = event.clientY - (bounds.top + bounds.height / 2);
     const onMove = (moveEvent: PointerEvent) => {
-      if (moveEvent.pointerId !== pointerId) return;
+      const drag = dragStateRef.current;
+      if (!drag || moveEvent.pointerId !== drag.pointerId) return;
+      moveEvent.preventDefault();
+      const currentViewport = viewportRef.current;
       dispatchPreferences({
-        type: "preferences/set-toolbar-offset",
-        offsetRatio: moveEvent.clientX / Math.max(1, window.innerWidth)
-      });
-      dispatchPreferences({
-        type: "preferences/set-toolbar-edge",
-        edge: moveEvent.clientY < window.innerHeight / 2 ? "top" : "bottom"
+        type: "preferences/set-toolbar-position",
+        offsetRatio:
+          (moveEvent.clientX - drag.pointerOffsetX - currentViewport.left) /
+          currentViewport.width,
+        verticalOffsetRatio:
+          (moveEvent.clientY - drag.pointerOffsetY - currentViewport.top) /
+          currentViewport.height,
       });
     };
-    const onUp = (upEvent: PointerEvent) => {
-      if (upEvent.pointerId !== pointerId) return;
-      dragStateRef.current = null;
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      showToolbar();
+    const onEnd = (endEvent: PointerEvent) => {
+      finishToolbarDrag(endEvent.pointerId);
     };
+
+    dragStateRef.current = {
+      pointerId,
+      pointerOffsetX,
+      pointerOffsetY,
+      grip,
+      onMove,
+      onEnd,
+    };
+    setToolbarDragging(true);
+    try {
+      grip.setPointerCapture(pointerId);
+    } catch {
+      // Capture is an enhancement; window listeners still complete the drag.
+    }
     window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointerup", onEnd);
+    window.addEventListener("pointercancel", onEnd);
   };
 
   const openOverlay = (next: Exclude<Overlay, null>) => {
@@ -352,14 +463,19 @@ export function App() {
   };
   const paused = preferences.pauseAnimations || editing || documentHidden;
   const pwaBannerVisible = !presentation && pwa.phase !== "idle" && pwa.phase !== "ready";
+  const toolbarPositionX =
+    viewport.left + preferences.toolbar.offsetRatio * viewport.width;
+  const toolbarPositionY =
+    viewport.top + preferences.toolbar.verticalOffsetRatio * viewport.height;
+  const panelEdge =
+    preferences.toolbar.verticalOffsetRatio < 0.5 ? "top" : "bottom";
   const shellClass = [
     "app-shell",
-    !presentation && preferences.toolbar.edge === "top" ? "toolbar-at-top" : null,
     pwaBannerVisible ? "has-pwa-banner" : null
   ].filter(Boolean).join(" ");
 
   return (
-    <div class={shellClass} onPointerDown={showToolbar}>
+    <div class={shellClass} onPointerDown={activateToolbar}>
       <BoardCanvas
         editHint={locale === "zh-TW" ? "雙擊畫面編輯文字" : "Double-click the board to edit"}
         onEdit={() => setEditing(true)}
@@ -367,7 +483,7 @@ export function App() {
           setEffectiveSize(size);
           setFitOverflow(overflow);
         }}
-        onInteraction={showToolbar}
+        onInteraction={activateToolbar}
         onNext={() => dispatchWorkspace({ type: "page/next" })}
         onPrevious={() => dispatchWorkspace({ type: "page/previous" })}
         page={page}
@@ -388,12 +504,15 @@ export function App() {
           <Toolbar
             activePanel={panel}
             bold={page.fontWeight >= 700}
-            edge={preferences.toolbar.edge}
-            hidden={toolbarHidden}
+            dragging={toolbarDragging}
+            idle={toolbarIdle}
             locale={locale}
             marqueeEnabled={page.marquee.enabled}
-            offsetRatio={preferences.toolbar.offsetRatio}
+            onActivate={activateToolbar}
+            onFocusChange={setToolbarFocused}
             onGripPointerDown={handleGripPointerDown}
+            onGripLostPointerCapture={(event) => finishToolbarDrag(event.pointerId)}
+            onHoverChange={setToolbarHovered}
             onToggleBold={() => dispatchWorkspace({ type: "page/toggle-bold", pageId: page.id })}
             onTogglePanel={(kind) => {
               setOverlay(null);
@@ -404,6 +523,8 @@ export function App() {
               pageId: page.id,
               theme: page.theme === "dark" ? "light" : "dark"
             })}
+            positionX={toolbarPositionX}
+            positionY={toolbarPositionY}
             theme={page.theme}
           />
           <ToolPanels
@@ -428,7 +549,7 @@ export function App() {
                 } else setCustomColorError(t("color.invalidHex"));
               }
             }}
-            edge={preferences.toolbar.edge}
+            edge={panelEdge}
             offsetRatio={preferences.toolbar.offsetRatio}
             font={{
               fontFamily: page.fontFamily,
@@ -470,7 +591,7 @@ export function App() {
 
       {overlay ? (
         <OverlayFrame
-          edge={preferences.toolbar.edge}
+          edge={panelEdge}
           labelledBy={overlay === "qr" ? "qr-panel-title" : overlay === "pages" ? "pages-panel-title" : "settings-panel-title"}
           offsetRatio={preferences.toolbar.offsetRatio}
           onClose={closeOverlay}
@@ -517,12 +638,10 @@ export function App() {
               onPauseAnimationsChange={(pauseAnimations) => dispatchPreferences({ type: "preferences/set-pause-animations", pauseAnimations })}
               onReset={resetAll}
               onShowShortcuts={() => setShortcutsOpen(true)}
-              onToolbarAutoHideChange={(autoHide) => dispatchPreferences({ type: "preferences/set-toolbar-auto-hide", autoHide })}
               pauseAnimations={preferences.pauseAnimations}
               pwaStatus={pwaSettings}
               storageError={!persistence.persistenceEnabled ? t("storage.corrupt") : persistence.saveFailed ? t("storage.failed") : null}
               storageMode={!persistence.persistenceEnabled || persistence.saveFailed ? "memory" : "local"}
-              toolbarAutoHide={preferences.toolbar.autoHide}
               wakeLockStatus={wakeLock}
             />
           ) : null}

@@ -140,13 +140,25 @@ export const WorkspaceV1Schema = v.pipe(
   ),
 );
 
-export const PreferencesV1Schema = v.strictObject({
-  locale: v.picklist(["zh-TW", "en"]),
-  toolbar: v.strictObject({
+const ratio = v.pipe(v.number(), v.finite(), v.minValue(0), v.maxValue(1));
+
+const ToolbarPreferencesV1Schema = v.pipe(
+  v.strictObject({
     edge: v.picklist(["top", "bottom"]),
-    offsetRatio: v.pipe(v.number(), v.finite(), v.minValue(0), v.maxValue(1)),
+    offsetRatio: ratio,
+    verticalOffsetRatio: v.optional(ratio),
     autoHide: v.boolean(),
   }),
+  v.transform((toolbar) => ({
+    ...toolbar,
+    verticalOffsetRatio:
+      toolbar.verticalOffsetRatio ?? (toolbar.edge === "top" ? 0 : 1),
+  })),
+);
+
+export const PreferencesV1Schema = v.strictObject({
+  locale: v.picklist(["zh-TW", "en"]),
+  toolbar: ToolbarPreferencesV1Schema,
   keepScreenAwake: v.boolean(),
   pauseAnimations: v.boolean(),
 });

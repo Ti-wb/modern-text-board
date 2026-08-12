@@ -308,4 +308,51 @@ describe("preferencesReducer", () => {
       pauseAnimations: true,
     });
   });
+
+  it("updates both toolbar axes atomically and clamps them into the viewport", () => {
+    const preferences = createDefaultPreferences();
+    const moved = preferencesReducer(preferences, {
+      type: "preferences/set-toolbar-position",
+      offsetRatio: -0.25,
+      verticalOffsetRatio: 1.25,
+    });
+
+    expect(moved.toolbar).toEqual({
+      ...preferences.toolbar,
+      edge: "bottom",
+      offsetRatio: 0,
+      verticalOffsetRatio: 1,
+    });
+
+    const movedToTop = preferencesReducer(moved, {
+      type: "preferences/set-toolbar-position",
+      offsetRatio: 0.75,
+      verticalOffsetRatio: 0.25,
+    });
+    expect(movedToTop.toolbar).toEqual({
+      ...preferences.toolbar,
+      edge: "top",
+      offsetRatio: 0.75,
+      verticalOffsetRatio: 0.25,
+    });
+  });
+
+  it("rejects a non-finite toolbar axis without partially updating the other", () => {
+    const preferences = createDefaultPreferences();
+
+    expect(
+      preferencesReducer(preferences, {
+        type: "preferences/set-toolbar-position",
+        offsetRatio: Number.NaN,
+        verticalOffsetRatio: 0.25,
+      }),
+    ).toBe(preferences);
+    expect(
+      preferencesReducer(preferences, {
+        type: "preferences/set-toolbar-position",
+        offsetRatio: 0.25,
+        verticalOffsetRatio: Number.POSITIVE_INFINITY,
+      }),
+    ).toBe(preferences);
+  });
 });
