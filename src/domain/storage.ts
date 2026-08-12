@@ -9,6 +9,7 @@ import {
 } from "./defaults";
 import type {
   ExportV1,
+  ImportTransactionJournalV1,
   Locale,
   PreferencesStorageEnvelopeV1,
   PreferencesV1,
@@ -19,6 +20,7 @@ import {
   parseExportJson,
   parseStoredJson,
   validateExport,
+  validateImportTransactionJournal,
   validatePreferences,
   validatePreferencesStorageEnvelope,
   validateWorkspace,
@@ -144,10 +146,100 @@ export function loadPreferences(
   );
 }
 
+export type ImportRecoveryResult =
+  | { success: true; recovered: boolean }
+  | { success: false; error: StorageFailure };
+
+function restoreRawValue(
+  storage: StorageLike,
+  key: string,
+  raw: string | null,
+): void {
+  if (raw === null) storage.removeItem(key);
+  else storage.setItem(key, raw);
+}
+
+/**
+ * Rolls back an import which did not reach its journal-removal commit point.
+ * The journal is deliberately removed last, so recovery is safe to retry after
+ * any individual localStorage operation fails.
+ */
+export function recoverImportTransaction(
+  storage: StorageLike | null = defaultStorage(),
+): ImportRecoveryResult {
+  if (storage === null) {
+    return {
+      success: false,
+      error: storageFailure(new Error("localStorage is not available")),
+    };
+  }
+
+  let raw: string | null;
+  try {
+    raw = storage.getItem(STORAGE_KEYS.importTransaction);
+  } catch (cause) {
+    return { success: false, error: storageFailure(cause) };
+  }
+  if (raw === null) return { success: true, recovered: false };
+
+  const parsed = parseStoredJson(raw, validateImportTransactionJournal);
+  if (!parsed.success) {
+    return {
+      success: false,
+      error: {
+        code: "invalid_data",
+        message:
+          "The pending import transaction is invalid, so stored board data cannot be trusted.",
+        validationError: parsed.error,
+      },
+    };
+  }
+
+  try {
+    restoreRawValue(
+      storage,
+      STORAGE_KEYS.preferences,
+      parsed.data.previousPreferences,
+    );
+    restoreRawValue(
+      storage,
+      STORAGE_KEYS.workspace,
+      parsed.data.previousWorkspace,
+    );
+    storage.removeItem(STORAGE_KEYS.importTransaction);
+    return { success: true, recovered: true };
+  } catch (cause) {
+    // Keep the journal as the durable recovery marker. A later hydration can
+    // retry the complete, idempotent rollback instead of trusting a partial pair.
+    return { success: false, error: storageFailure(cause) };
+  }
+}
+
 export function hydrateDomainData(
   locale: Locale = "zh-TW",
   storage: StorageLike | null = defaultStorage(),
 ): HydratedDomainData {
+  const recovery = recoverImportTransaction(storage);
+  if (!recovery.success) {
+    const workspaceLoad: StorageLoadResult<WorkspaceStorageEnvelopeV1> = {
+      status: "unavailable",
+      error: recovery.error,
+    };
+    const preferencesLoad: StorageLoadResult<PreferencesStorageEnvelopeV1> = {
+      status: "unavailable",
+      error: recovery.error,
+    };
+    return {
+      workspace: createDefaultWorkspace(locale),
+      preferences: createDefaultPreferences(locale),
+      workspaceRevision: 0,
+      preferencesRevision: 0,
+      autosaveAllowed: false,
+      workspaceLoad,
+      preferencesLoad,
+    };
+  }
+
   const workspaceLoad = loadWorkspace(storage);
   const preferencesLoad = loadPreferences(storage);
   return {
@@ -331,6 +423,15 @@ export function commitImport(
       },
     };
   }
+  if (options.writerId.trim().length === 0) {
+    return {
+      success: false,
+      error: {
+        code: "invalid_data",
+        message: "A non-empty writer ID is required to save data.",
+      },
+    };
+  }
 
   const storage = options.storage === undefined ? defaultStorage() : options.storage;
   if (storage === null) {
@@ -339,6 +440,9 @@ export function commitImport(
       error: storageFailure(new Error("localStorage is not available")),
     };
   }
+
+  const pendingRecovery = recoverImportTransaction(storage);
+  if (!pendingRecovery.success) return pendingRecovery;
 
   let previousWorkspace: string | null;
   let previousPreferences: string | null;
@@ -350,31 +454,60 @@ export function commitImport(
   }
 
   const now = options.now ?? (() => new Date());
-  const savedPreferences = savePreferences(validation.data.preferences, {
+  const savedAt = now().toISOString();
+  const journal: ImportTransactionJournalV1 = {
+    format: "simple-white-board/import-transaction",
+    schemaVersion: SCHEMA_VERSION,
+    transactionId: createId(),
+    createdAt: savedAt,
+    previousWorkspace,
+    previousPreferences,
+  };
+  const savedJournal = persistEnvelope(
+    STORAGE_KEYS.importTransaction,
+    journal,
     storage,
-    writerId: options.writerId,
-    revision: options.preferencesRevision,
-    now,
-  });
-  if (!savedPreferences.success) return savedPreferences;
+  );
+  if (!savedJournal.success) return savedJournal;
 
-  const savedWorkspace = saveWorkspace(validation.data.workspace, {
-    storage,
+  const preferences: PreferencesStorageEnvelopeV1 = {
+    format: "simple-white-board/local-preferences",
+    schemaVersion: SCHEMA_VERSION,
+    revision: nextRevision(options.preferencesRevision),
+    savedAt,
     writerId: options.writerId,
-    revision: options.workspaceRevision,
-    now,
-  });
+    preferences: validation.data.preferences,
+  };
+  const savedPreferences = persistEnvelope(
+    STORAGE_KEYS.preferences,
+    preferences,
+    storage,
+  );
+  if (!savedPreferences.success) {
+    recoverImportTransaction(storage);
+    return savedPreferences;
+  }
+
+  const workspace: WorkspaceStorageEnvelopeV1 = {
+    format: "simple-white-board/local-workspace",
+    schemaVersion: SCHEMA_VERSION,
+    revision: nextRevision(options.workspaceRevision),
+    savedAt,
+    writerId: options.writerId,
+    workspace: validation.data.workspace,
+  };
+  const savedWorkspace = persistEnvelope(STORAGE_KEYS.workspace, workspace, storage);
   if (!savedWorkspace.success) {
-    try {
-      if (previousPreferences === null) storage.removeItem(STORAGE_KEYS.preferences);
-      else storage.setItem(STORAGE_KEYS.preferences, previousPreferences);
-      if (previousWorkspace === null) storage.removeItem(STORAGE_KEYS.workspace);
-      else storage.setItem(STORAGE_KEYS.workspace, previousWorkspace);
-    } catch {
-      // The original save error remains the most useful result. The UI keeps its
-      // in-memory state unchanged and can offer an export before retrying.
-    }
+    recoverImportTransaction(storage);
     return savedWorkspace;
+  }
+
+  try {
+    storage.removeItem(STORAGE_KEYS.importTransaction);
+  } catch (cause) {
+    const error = storageFailure(cause);
+    recoverImportTransaction(storage);
+    return { success: false, error };
   }
 
   return {

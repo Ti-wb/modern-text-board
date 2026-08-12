@@ -6,6 +6,15 @@ interface QrDisplayProps {
   errorLabel: string;
 }
 
+const QUIET_ZONE_MODULES = 8;
+const MIN_QR_CSS_SIZE = 168;
+const MAX_QR_CSS_SIZE = 320;
+
+function cssPixels(value: string): number {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export function QrDisplay({ payload, errorLabel }: QrDisplayProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -18,30 +27,30 @@ export function QrDisplay({ payload, errorLabel }: QrDisplayProps) {
 
     let cancelled = false;
     const render = async () => {
-      const computed = window.getComputedStyle(wrapper);
-      const horizontalPadding = Number.parseFloat(computed.paddingLeft) + Number.parseFloat(computed.paddingRight);
-      const verticalPadding = Number.parseFloat(computed.paddingTop) + Number.parseFloat(computed.paddingBottom);
-      const available = Math.min(
-        wrapper.clientWidth - horizontalPadding,
-        (wrapper.clientHeight || wrapper.clientWidth) - verticalPadding
-      );
-      const hasMeasuredSpace = available > 0;
-      const targetCssSize = hasMeasuredSpace
-        ? Math.max(1, Math.min(320, Math.floor(available)))
-        : 168;
-      let moduleCount = 37;
       try {
-        moduleCount = QRCode.create(payload, { errorCorrectionLevel: "M" }).modules.size + 8;
-      } catch {
-        // Test doubles and older compatible builds may expose only toCanvas.
-      }
-      const devicePixelRatio = Math.min(window.devicePixelRatio || 1, 3);
-      const scale = Math.max(1, Math.floor((targetCssSize * devicePixelRatio) / moduleCount));
-      const deviceSize = moduleCount * scale;
-      const cssSize = hasMeasuredSpace
-        ? Math.min(targetCssSize, Math.floor(deviceSize / devicePixelRatio))
-        : targetCssSize;
-      try {
+        const computed = window.getComputedStyle(wrapper);
+        const horizontalPadding = cssPixels(computed.paddingLeft) + cssPixels(computed.paddingRight);
+        const verticalPadding = cssPixels(computed.paddingTop) + cssPixels(computed.paddingBottom);
+        const available = Math.min(
+          wrapper.clientWidth - horizontalPadding,
+          (wrapper.clientHeight || wrapper.clientWidth) - verticalPadding
+        );
+        const targetCssSize = Math.min(
+          MAX_QR_CSS_SIZE,
+          Math.max(MIN_QR_CSS_SIZE, Math.floor(available || MIN_QR_CSS_SIZE))
+        );
+        const moduleCount = QRCode.create(payload, {
+          errorCorrectionLevel: "M"
+        }).modules.size + QUIET_ZONE_MODULES;
+        const devicePixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
+        // The bitmap always uses whole device pixels per QR module. CSS may
+        // downsample that square slightly to keep a predictable 168–320px
+        // board footprint without ever distorting its aspect ratio.
+        const scale = Math.max(
+          1,
+          Math.ceil((targetCssSize * devicePixelRatio) / moduleCount)
+        );
+
         await QRCode.toCanvas(canvas, payload, {
           errorCorrectionLevel: "M",
           margin: 4,
@@ -49,8 +58,8 @@ export function QrDisplay({ payload, errorLabel }: QrDisplayProps) {
           color: { dark: "#000000ff", light: "#ffffffff" }
         });
         if (cancelled) return;
-        canvas.style.setProperty("width", `${cssSize}px`);
-        canvas.style.setProperty("height", `${cssSize}px`);
+        canvas.style.setProperty("width", `${targetCssSize}px`);
+        canvas.style.setProperty("height", `${targetCssSize}px`);
         setError(false);
       } catch {
         if (!cancelled) setError(true);

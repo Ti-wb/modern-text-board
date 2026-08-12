@@ -3,6 +3,7 @@ import * as v from "valibot";
 import { LIMITS, SCHEMA_VERSION, codePointLength, utf8ByteLength } from "./defaults";
 import type {
   ExportV1,
+  ImportTransactionJournalV1,
   PreferencesStorageEnvelopeV1,
   PreferencesV1,
   WorkspaceStorageEnvelopeV1,
@@ -107,8 +108,10 @@ export const BoardPageV1Schema = v.pipe(
     }),
   }),
   v.check(
-    (page) => !page.qr.enabled || page.qr.payload !== null,
-    "Enabled QR must be initialized",
+    (page) =>
+      !page.qr.enabled ||
+      (page.qr.payload !== null && page.qr.payload.length > 0),
+    "Enabled QR must have a non-empty payload",
   ),
 );
 
@@ -172,6 +175,15 @@ export const PreferencesStorageEnvelopeV1Schema = v.strictObject({
   savedAt: isoDateString,
   writerId: nonEmptyString,
   preferences: PreferencesV1Schema,
+});
+
+export const ImportTransactionJournalV1Schema = v.strictObject({
+  format: v.literal("simple-white-board/import-transaction"),
+  schemaVersion: v.literal(SCHEMA_VERSION),
+  transactionId: nonEmptyString,
+  createdAt: isoDateString,
+  previousWorkspace: v.nullable(v.string()),
+  previousPreferences: v.nullable(v.string()),
 });
 
 function getIssueMessages(issues: readonly v.BaseIssue<unknown>[]): string[] {
@@ -269,6 +281,21 @@ export function validatePreferencesStorageEnvelope(
   return header.success
     ? validateWithSchema<PreferencesStorageEnvelopeV1>(
         PreferencesStorageEnvelopeV1Schema,
+        input,
+      )
+    : header;
+}
+
+export function validateImportTransactionJournal(
+  input: unknown,
+): ValidationResult<ImportTransactionJournalV1> {
+  const header = checkDiscriminator(
+    input,
+    "simple-white-board/import-transaction",
+  );
+  return header.success
+    ? validateWithSchema<ImportTransactionJournalV1>(
+        ImportTransactionJournalV1Schema,
         input,
       )
     : header;

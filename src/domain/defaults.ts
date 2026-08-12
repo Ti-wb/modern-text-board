@@ -23,6 +23,7 @@ export const LIMITS = Object.freeze({
 export const STORAGE_KEYS = Object.freeze({
   workspace: "simple-white-board.workspace",
   preferences: "simple-white-board.preferences",
+  importTransaction: "simple-white-board.import-transaction",
 });
 
 export const DEFAULT_PAGE_NAMES: Record<Locale, string> = {

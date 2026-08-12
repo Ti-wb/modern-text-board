@@ -153,7 +153,7 @@ export function App() {
     if (hideTimerRef.current !== null) window.clearTimeout(hideTimerRef.current);
     if (preferences.toolbar.autoHide && !editing && !panel && !overlay && !shortcutsOpen && !presentation) {
       hideTimerRef.current = window.setTimeout(() => {
-        if (!dragStateRef.current && !document.querySelector(".toolbar-shell:focus-within")) {
+        if (!dragStateRef.current && !document.querySelector(".toolbar-shell :focus-visible")) {
           setToolbarHidden(true);
         }
       }, 3000);
@@ -207,6 +207,7 @@ export function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && (event.isComposing || event.keyCode === 229)) return;
       if (event.key === "Escape") {
         if (editing || shortcutsOpen || importPreview || overlay || panel) closeTransientUi();
         else if (presentation) void exitPresentation();

@@ -287,10 +287,10 @@ html[data-presentation="true"] .save-indicator {
   align-items: center;
   justify-content: center;
   width: 100%;
-  min-width: 0;
-  min-height: 168px;
+  min-width: 186px;
+  min-height: 186px;
   max-height: 100%;
-  padding: clamp(8px, 1.5vw, 16px);
+  padding: 8px;
   overflow: hidden;
   background: #fff;
   border: 1px solid rgba(0, 0, 0, 0.08);
@@ -300,8 +300,10 @@ html[data-presentation="true"] .save-indicator {
 
 .qr-canvas {
   display: block;
-  max-width: 100%;
-  max-height: 100%;
+  flex: 0 0 auto;
+  max-width: none;
+  max-height: none;
+  aspect-ratio: 1;
   image-rendering: pixelated;
 }
 
@@ -1007,7 +1009,9 @@ input[type="range"] {
 
 .pwa-status {
   position: fixed;
-  z-index: 85;
+  /* Notifications stay above the board/toolbar, but never block an open
+     settings sheet or modal dialog. */
+  z-index: 25;
   top: calc(var(--visual-viewport-top) + var(--safe-top));
   left: 50%;
   display: flex;

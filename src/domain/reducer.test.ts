@@ -196,6 +196,77 @@ describe("workspaceReducer page settings", () => {
     expect(state.pages[0].qr.payload).toBe("first");
   });
 
+  it("refuses to enable QR when the effective payload is empty", () => {
+    const page = createDefaultPage("one", "One");
+    let state = workspace(page);
+
+    expect(
+      workspaceReducer(state, {
+        type: "page/set-qr-enabled",
+        pageId: "one",
+        enabled: true,
+      }),
+    ).toBe(state);
+
+    state = workspaceReducer(state, {
+      type: "page/set-qr-payload",
+      pageId: "one",
+      payload: "",
+    });
+    const emptyPayloadState = state;
+    expect(
+      workspaceReducer(state, {
+        type: "page/set-qr-enabled",
+        pageId: "one",
+        enabled: true,
+      }),
+    ).toBe(emptyPayloadState);
+
+    state = workspaceReducer(state, {
+      type: "page/set-qr-payload",
+      pageId: "one",
+      payload: " ",
+    });
+    state = workspaceReducer(state, {
+      type: "page/set-qr-enabled",
+      pageId: "one",
+      enabled: true,
+    });
+    expect(state.pages[0].qr).toEqual({ enabled: true, payload: " " });
+  });
+
+  it("does not clear the payload of an enabled QR", () => {
+    const page = createDefaultPage("one", "One");
+    page.qr = { enabled: true, payload: "kept" };
+    const state = workspace(page);
+
+    expect(
+      workspaceReducer(state, {
+        type: "page/set-qr-payload",
+        pageId: "one",
+        payload: "",
+      }),
+    ).toBe(state);
+    expect(
+      workspaceReducer(state, {
+        type: "page/set-qr-payload",
+        pageId: "one",
+        payload: null,
+      }),
+    ).toBe(state);
+  });
+
+  it("rejects replacement workspaces containing an enabled empty QR", () => {
+    const current = workspace(createDefaultPage("one", "One"));
+    const invalidPage = createDefaultPage("invalid", "Invalid");
+    invalidPage.qr = { enabled: true, payload: "" };
+    const invalid = workspace(invalidPage);
+
+    expect(
+      workspaceReducer(current, { type: "workspace/replace", workspace: invalid }),
+    ).toBe(current);
+  });
+
   it("enforces QR limits by UTF-8 bytes without trimming whitespace", () => {
     const page = createDefaultPage("one", "One");
     let state = workspace(page);

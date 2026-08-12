@@ -81,6 +81,15 @@ export interface PreferencesStorageEnvelopeV1 {
   preferences: PreferencesV1;
 }
 
+export interface ImportTransactionJournalV1 {
+  format: "simple-white-board/import-transaction";
+  schemaVersion: 1;
+  transactionId: string;
+  createdAt: string;
+  previousWorkspace: string | null;
+  previousPreferences: string | null;
+}
+
 export type WorkspaceAction =
   | { type: "workspace/replace"; workspace: WorkspaceV1 }
   | { type: "page/add"; id: string; name: string; afterPageId?: string }

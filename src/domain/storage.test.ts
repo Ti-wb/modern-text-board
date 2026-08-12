@@ -118,6 +118,112 @@ describe("local persistence", () => {
     expect(result).toMatchObject({ success: false });
     expect(storage.getItem(STORAGE_KEYS.preferences)).toBe(oldPreferences);
   });
+
+  it("recovers the old pair on hydration after the second write and rollback fail", () => {
+    class InterruptedImportStorage extends MemoryStorage {
+      armed = false;
+      workspaceWriteFailed = false;
+
+      override setItem(key: string, value: string) {
+        if (this.armed && key === STORAGE_KEYS.workspace) {
+          this.workspaceWriteFailed = true;
+          throw new DOMException("full", "QuotaExceededError");
+        }
+        if (
+          this.armed &&
+          this.workspaceWriteFailed &&
+          key === STORAGE_KEYS.preferences
+        ) {
+          throw new DOMException("blocked", "SecurityError");
+        }
+        super.setItem(key, value);
+      }
+    }
+
+    const storage = new InterruptedImportStorage();
+    const oldWorkspace = createDefaultWorkspace("en", "old-page");
+    oldWorkspace.pages[0].text = "old board";
+    const oldPreferences = createDefaultPreferences("en");
+    expect(
+      saveWorkspace(oldWorkspace, { storage, writerId: "old-tab", revision: 3 }),
+    ).toMatchObject({ success: true });
+    expect(
+      savePreferences(oldPreferences, {
+        storage,
+        writerId: "old-tab",
+        revision: 5,
+      }),
+    ).toMatchObject({ success: true });
+    const oldWorkspaceRaw = storage.getItem(STORAGE_KEYS.workspace);
+    const oldPreferencesRaw = storage.getItem(STORAGE_KEYS.preferences);
+
+    const importedWorkspace = createDefaultWorkspace("zh-TW", "new-page");
+    importedWorkspace.pages[0].text = "new board";
+    const importedPreferences = createDefaultPreferences("zh-TW");
+    importedPreferences.keepScreenAwake = true;
+    storage.armed = true;
+    const result = commitImport(
+      createExport(importedWorkspace, importedPreferences),
+      {
+        storage,
+        writerId: "import-tab",
+        workspaceRevision: 4,
+        preferencesRevision: 6,
+      },
+    );
+
+    expect(result).toMatchObject({ success: false });
+    expect(storage.getItem(STORAGE_KEYS.importTransaction)).not.toBeNull();
+    expect(storage.getItem(STORAGE_KEYS.workspace)).toBe(oldWorkspaceRaw);
+    expect(storage.getItem(STORAGE_KEYS.preferences)).not.toBe(oldPreferencesRaw);
+
+    const blockedHydration = hydrateDomainData("zh-TW", storage);
+    expect(blockedHydration.autosaveAllowed).toBe(false);
+    expect(blockedHydration.workspaceLoad.status).toBe("unavailable");
+    expect(blockedHydration.preferencesLoad.status).toBe("unavailable");
+    expect(blockedHydration.preferences.keepScreenAwake).toBe(false);
+    expect(storage.getItem(STORAGE_KEYS.importTransaction)).not.toBeNull();
+
+    storage.armed = false;
+    const hydrated = hydrateDomainData("zh-TW", storage);
+    expect(hydrated.workspace).toEqual(oldWorkspace);
+    expect(hydrated.preferences).toEqual(oldPreferences);
+    expect(hydrated.workspaceRevision).toBe(4);
+    expect(hydrated.preferencesRevision).toBe(6);
+    expect(hydrated.autosaveAllowed).toBe(true);
+    expect(storage.getItem(STORAGE_KEYS.workspace)).toBe(oldWorkspaceRaw);
+    expect(storage.getItem(STORAGE_KEYS.preferences)).toBe(oldPreferencesRaw);
+    expect(storage.getItem(STORAGE_KEYS.importTransaction)).toBeNull();
+  });
+
+  it("clears the import journal only after both imported envelopes are saved", () => {
+    const storage = new MemoryStorage();
+    const workspace = createDefaultWorkspace("en", "imported-page");
+    workspace.pages[0].text = "imported";
+    const preferences = createDefaultPreferences("en");
+
+    const result = commitImport(createExport(workspace, preferences), {
+      storage,
+      writerId: "import-tab",
+      workspaceRevision: 8,
+      preferencesRevision: 10,
+      now: () => new Date("2026-08-12T12:00:00.000Z"),
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      workspace: { revision: 9, workspace },
+      preferences: { revision: 11, preferences },
+    });
+    expect(storage.getItem(STORAGE_KEYS.importTransaction)).toBeNull();
+    expect(hydrateDomainData("zh-TW", storage)).toMatchObject({
+      workspace,
+      preferences,
+      workspaceRevision: 9,
+      preferencesRevision: 11,
+      autosaveAllowed: true,
+    });
+  });
 });
 
 describe("workspace autosave and multi-tab conflicts", () => {

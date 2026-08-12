@@ -61,7 +61,12 @@ function isBasicWorkspaceInvariant(workspace: WorkspaceV1): boolean {
   if (
     workspace.pages.length < 1 ||
     workspace.pages.length > LIMITS.maxPages ||
-    !workspace.pages.some((page) => page.id === workspace.activePageId)
+    !workspace.pages.some((page) => page.id === workspace.activePageId) ||
+    workspace.pages.some(
+      (page) =>
+        page.qr.enabled &&
+        (page.qr.payload === null || page.qr.payload.length === 0),
+    )
   ) {
     return false;
   }
@@ -277,6 +282,9 @@ export function workspaceReducer(
               ? page.text
               : ""
             : page.qr.payload;
+        if (action.enabled && (payload === null || payload.length === 0)) {
+          return page;
+        }
         return page.qr.enabled === action.enabled && payload === page.qr.payload
           ? page
           : { ...page, qr: { enabled: action.enabled, payload } };
@@ -289,11 +297,17 @@ export function workspaceReducer(
       ) {
         return workspace;
       }
-      return replacePage(workspace, action.pageId, (page) =>
-        page.qr.payload === action.payload
+      return replacePage(workspace, action.pageId, (page) => {
+        if (
+          page.qr.enabled &&
+          (action.payload === null || action.payload.length === 0)
+        ) {
+          return page;
+        }
+        return page.qr.payload === action.payload
           ? page
-          : { ...page, qr: { ...page.qr, payload: action.payload } },
-      );
+          : { ...page, qr: { ...page.qr, payload: action.payload } };
+      });
   }
 }
 

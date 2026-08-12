@@ -77,6 +77,16 @@ describe("domain validation", () => {
     });
     page.qr.payload = "";
     expect(validateWorkspace({ pages: [page], activePageId: page.id })).toMatchObject({
+      success: false,
+    });
+    expect(
+      parseExportJson(JSON.stringify(createExport(
+        { pages: [page], activePageId: page.id },
+        createDefaultPreferences("en"),
+      ))),
+    ).toMatchObject({ success: false });
+    page.qr.enabled = false;
+    expect(validateWorkspace({ pages: [page], activePageId: page.id })).toMatchObject({
       success: true,
     });
   });

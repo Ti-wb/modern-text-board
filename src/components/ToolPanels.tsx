@@ -257,6 +257,7 @@ function PanelFrame({
     dialog?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && (event.isComposing || event.keyCode === 229)) return;
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
