@@ -43,7 +43,7 @@ npm run preview
 | Framework preset | Vite（或 None） |
 | Build command | `npm run build` |
 | Build output directory | `dist` |
-| Root directory | `/` |
+| Root directory | 留空（repository 根目錄） |
 | Node.js | 22 |
 
 `public/_headers` 會隨 build 複製到 `dist/_headers`，提供 CSP、Permissions Policy 與正確的快取策略：只有帶內容雜湊的 `/assets/*` 長效快取；HTML、manifest 與 Service Worker 每次重新驗證。專案不需要 `_redirects`，也不應加入全域 SPA rewrite。

@@ -16,7 +16,13 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI
   },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "chromium-390x844", use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 } } },
+    { name: "chromium-430x932", use: { ...devices["Desktop Chrome"], viewport: { width: 430, height: 932 } } },
+    { name: "chromium-500x768", use: { ...devices["Desktop Chrome"], viewport: { width: 500, height: 768 } } },
+    { name: "chromium-768x1024", use: { ...devices["Desktop Chrome"], viewport: { width: 768, height: 1024 } } },
+    { name: "chromium-1024x768", use: { ...devices["Desktop Chrome"], viewport: { width: 1024, height: 768 } } },
+    { name: "chromium-1280x800", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } } },
+    { name: "chromium-1440x900", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
     { name: "firefox", use: { ...devices["Desktop Firefox"] } },
     { name: "webkit", use: { ...devices["Desktop Safari"] } },
     {
