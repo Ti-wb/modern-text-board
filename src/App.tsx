@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "p
 
 import { BoardCanvas } from "./components/BoardCanvas";
 import { ImportPreview } from "./components/ImportPreview";
+import { OverlayFrame } from "./components/OverlayFrame";
 import { PageManager } from "./components/PageManager";
 import { PwaStatus } from "./components/PwaStatus";
 import { QrPanel } from "./components/QrPanel";
@@ -165,15 +166,24 @@ export function App() {
   }, [locale, t]);
 
   useEffect(() => {
+    const visualViewport = window.visualViewport;
     const updateVisualViewport = () => {
-      const height = window.visualViewport?.height ?? window.innerHeight;
+      const height = visualViewport?.height ?? window.innerHeight;
+      const top = Math.max(0, visualViewport?.offsetTop ?? 0);
+      const left = Math.max(0, visualViewport?.offsetLeft ?? 0);
       document.documentElement.style.setProperty("--visual-viewport-height", `${height}px`);
+      document.documentElement.style.setProperty("--visual-viewport-top", `${top}px`);
+      document.documentElement.style.setProperty("--visual-viewport-left", `${left}px`);
     };
     updateVisualViewport();
-    window.visualViewport?.addEventListener("resize", updateVisualViewport);
+    visualViewport?.addEventListener("resize", updateVisualViewport);
+    visualViewport?.addEventListener("scroll", updateVisualViewport);
+    window.addEventListener("resize", updateVisualViewport);
     window.addEventListener("orientationchange", updateVisualViewport);
     return () => {
-      window.visualViewport?.removeEventListener("resize", updateVisualViewport);
+      visualViewport?.removeEventListener("resize", updateVisualViewport);
+      visualViewport?.removeEventListener("scroll", updateVisualViewport);
+      window.removeEventListener("resize", updateVisualViewport);
       window.removeEventListener("orientationchange", updateVisualViewport);
     };
   }, []);
@@ -340,9 +350,15 @@ export function App() {
     update: pwa.phase === "updating" ? "updating" : pwa.updateAvailable ? "available" : pwa.supported ? "current" : "unavailable"
   };
   const paused = preferences.pauseAnimations || editing || documentHidden;
+  const pwaBannerVisible = !presentation && pwa.phase !== "idle" && pwa.phase !== "ready";
+  const shellClass = [
+    "app-shell",
+    !presentation && preferences.toolbar.edge === "top" ? "toolbar-at-top" : null,
+    pwaBannerVisible ? "has-pwa-banner" : null
+  ].filter(Boolean).join(" ");
 
   return (
-    <div class="app-shell" onPointerDown={showToolbar}>
+    <div class={shellClass} onPointerDown={showToolbar}>
       <BoardCanvas
         editHint={locale === "zh-TW" ? "雙擊畫面編輯文字" : "Double-click the board to edit"}
         onEdit={() => setEditing(true)}
@@ -412,6 +428,7 @@ export function App() {
               }
             }}
             edge={preferences.toolbar.edge}
+            offsetRatio={preferences.toolbar.offsetRatio}
             font={{
               fontFamily: page.fontFamily,
               maxFontSizePx: page.maxFontSizePx,
@@ -450,9 +467,13 @@ export function App() {
         </>
       ) : null}
 
-      {overlay ? <div aria-hidden="true" class="panel-scrim" onClick={closeOverlay} /> : null}
       {overlay ? (
-        <div class={`tool-panel-wrap edge-${preferences.toolbar.edge}`}>
+        <OverlayFrame
+          edge={preferences.toolbar.edge}
+          labelledBy={overlay === "qr" ? "qr-panel-title" : overlay === "pages" ? "pages-panel-title" : "settings-panel-title"}
+          offsetRatio={preferences.toolbar.offsetRatio}
+          onClose={closeOverlay}
+        >
           {overlay === "qr" ? (
             <QrPanel
               enabled={page.qr.enabled}
@@ -504,7 +525,7 @@ export function App() {
               wakeLockStatus={wakeLock}
             />
           ) : null}
-        </div>
+        </OverlayFrame>
       ) : null}
 
       {editing ? (
@@ -556,7 +577,7 @@ export function App() {
           <div class={`toast ${toast.error ? "is-error" : ""}`} role={toast.error ? "alert" : "status"}>{toast.message}</div>
         </div>
       ) : null}
-      <PwaStatus locale={locale} status={pwa} />
+      {!presentation ? <PwaStatus locale={locale} status={pwa} /> : null}
     </div>
   );
 }

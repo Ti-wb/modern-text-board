@@ -32,10 +32,11 @@ export function useAutoFit({
     const height = Math.max(1, container.clientHeight);
 
     const fits = (candidate: number) => {
+      const constrainWidth = mode !== "horizontal";
       measure.style.fontSize = `${candidate}px`;
-      measure.style.width = mode === "static" ? `${width}px` : "max-content";
-      measure.style.maxWidth = mode === "static" ? `${width}px` : "none";
-      measure.style.whiteSpace = mode === "static" ? "pre-wrap" : "pre";
+      measure.style.width = constrainWidth ? `${width}px` : "max-content";
+      measure.style.maxWidth = constrainWidth ? `${width}px` : "none";
+      measure.style.whiteSpace = mode === "horizontal" ? "pre" : "pre-wrap";
       const rect = measure.getBoundingClientRect();
       const fitsWidth = rect.width <= width + 1 && measure.scrollWidth <= width + 1;
       const fitsHeight = rect.height <= height + 1 && measure.scrollHeight <= height + 1;

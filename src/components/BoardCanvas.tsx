@@ -51,12 +51,13 @@ export function BoardCanvas({
   });
 
   const displayText = page.text || placeholder;
+  const horizontalMarquee = page.marquee.enabled &&
+    (page.marquee.direction === "left" || page.marquee.direction === "right");
+  const verticalMarquee = page.marquee.enabled && !horizontalMarquee;
   const mode = !page.marquee.enabled
     ? "static"
-    : page.marquee.direction === "left" || page.marquee.direction === "right"
-      ? "horizontal"
-      : "vertical";
-  const { fontSize, overflow, recalculate } = useAutoFit({
+    : horizontalMarquee ? "horizontal" : "vertical";
+  const { fontSize, overflow } = useAutoFit({
     containerRef: textViewportRef,
     measureRef,
     content: displayText,
@@ -73,7 +74,6 @@ export function BoardCanvas({
     if (!viewport || !moving || !page.marquee.enabled) return;
 
     const update = () => {
-      recalculate();
       const viewportRect = viewport.getBoundingClientRect();
       const contentRect = moving.getBoundingClientRect();
       const pixelsPerSecond = 24 + ((page.marquee.speed - 1) / 9) * 136;
@@ -99,13 +99,22 @@ export function BoardCanvas({
         endY = viewportRect.height;
         distance = viewportRect.height + contentRect.height;
       }
-      setMotion({
+      const nextMotion = {
         startX: `${startX}px`,
         startY: `${startY}px`,
         endX: `${endX}px`,
         endY: `${endY}px`,
         duration: Math.max(1.5, distance / pixelsPerSecond)
-      });
+      };
+      setMotion((current) =>
+        current.startX === nextMotion.startX &&
+        current.startY === nextMotion.startY &&
+        current.endX === nextMotion.endX &&
+        current.endY === nextMotion.endY &&
+        current.duration === nextMotion.duration
+          ? current
+          : nextMotion
+      );
     };
 
     const observer = new ResizeObserver(update);
@@ -116,7 +125,7 @@ export function BoardCanvas({
       cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, [fontSize, page.marquee.direction, page.marquee.enabled, page.marquee.speed, recalculate]);
+  }, [fontSize, page.marquee.direction, page.marquee.enabled, page.marquee.speed]);
 
   const textColor = page.textColor === "auto" ? (page.theme === "dark" ? "#ffffff" : "#1a1a1e") : page.textColor;
   const textStyle = useMemo(
@@ -125,13 +134,15 @@ export function BoardCanvas({
       fontSize: `${fontSize}px`,
       fontWeight: String(page.fontWeight),
       textAlign: page.textAlign,
+      width: verticalMarquee ? "100%" : undefined,
+      maxWidth: verticalMarquee ? "100%" : undefined,
       "--marquee-start-x": motion.startX,
       "--marquee-start-y": motion.startY,
       "--marquee-end-x": motion.endX,
       "--marquee-end-y": motion.endY,
       "--marquee-duration": `${motion.duration}s`
     }),
-    [fontSize, motion, page.fontWeight, page.textAlign, textColor]
+    [fontSize, motion, page.fontWeight, page.textAlign, textColor, verticalMarquee]
   );
 
   const isInteractiveTarget = (target: EventTarget | null) =>
@@ -177,7 +188,12 @@ export function BoardCanvas({
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
     >
-      {!presentation ? <p class="edit-hint">{editHint}</p> : null}
+      {!presentation ? (
+        <button class="canvas-edit-access" type="button" onClick={onEdit}>
+          {editHint}
+        </button>
+      ) : null}
+      {!presentation ? <p aria-hidden="true" class="edit-hint">{editHint}</p> : null}
       <section class={`board-layout ${page.qr.enabled && page.qr.payload ? "has-qr" : ""}`}>
         <div class="text-viewport" ref={textViewportRef}>
           <span
@@ -195,7 +211,7 @@ export function BoardCanvas({
           >
             <div class={`${page.flashEnabled ? "is-flashing" : ""} ${paused ? "is-paused" : ""}`}>
               <div class={page.mirrored ? "is-mirrored" : ""}>
-                <p class={`display-text ${fontClasses[page.fontFamily]} ${page.marquee.enabled ? "no-wrap" : ""}`}>
+                <p class={`display-text ${fontClasses[page.fontFamily]} ${horizontalMarquee ? "no-wrap" : ""}`}>
                   {displayText}
                 </p>
               </div>

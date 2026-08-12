@@ -71,6 +71,16 @@ export function useDomainPersistence({
     revision: initialWorkspaceRevision
   });
 
+  const enterMemoryMode = useCallback(() => {
+    enabledRef.current = false;
+    setPersistenceEnabled(false);
+    setMemoryMode(true);
+    if (workspaceTimerRef.current !== null) window.clearTimeout(workspaceTimerRef.current);
+    if (preferencesTimerRef.current !== null) window.clearTimeout(preferencesTimerRef.current);
+    workspaceTimerRef.current = null;
+    preferencesTimerRef.current = null;
+  }, []);
+
   useEffect(() => {
     remoteWorkspaceCallbackRef.current = onRemoteWorkspace;
     remotePreferencesCallbackRef.current = onRemotePreferences;
@@ -88,7 +98,7 @@ export function useDomainPersistence({
       revision: workspaceRevisionRef.current
     });
     if (!result.success) {
-      setMemoryMode(true);
+      enterMemoryMode();
       setWorkspaceStatus({
         status: "failed",
         dirty: true,
@@ -103,7 +113,7 @@ export function useDomainPersistence({
     workspaceDirtyRef.current = false;
     setWorkspaceStatus({ status: "saved", dirty: false, revision: result.data.revision });
     return true;
-  }, [writerId]);
+  }, [enterMemoryMode, writerId]);
 
   const flushPreferences = useCallback((): boolean => {
     if (preferencesTimerRef.current !== null) window.clearTimeout(preferencesTimerRef.current);
@@ -116,7 +126,7 @@ export function useDomainPersistence({
       revision: preferencesRevisionRef.current
     });
     if (!result.success) {
-      setMemoryMode(true);
+      enterMemoryMode();
       setPreferenceSaveFailed(true);
       return false;
     }
@@ -126,7 +136,7 @@ export function useDomainPersistence({
     setPreferenceDirty(false);
     setPreferenceSaveFailed(false);
     return true;
-  }, [writerId]);
+  }, [enterMemoryMode, writerId]);
 
   const flush = useCallback((): boolean => {
     const workspaceSaved = flushWorkspace();

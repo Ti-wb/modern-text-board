@@ -1,5 +1,6 @@
+import type { JSX } from "preact";
 import type { DragEvent } from "preact/compat";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 
 import { codePointLength } from "../domain/defaults";
 import type { BoardPageV1, Locale } from "../domain/types";
@@ -24,6 +25,13 @@ export interface PageManagerProps {
 
 const PAGE_NAME_LIMIT = 60;
 
+interface PointerDragState {
+  pageId: string;
+  pointerId: number;
+  sourceIndex: number;
+  targetIndex: number;
+}
+
 function truncateCodePoints(value: string, limit: number): string {
   return Array.from(value).slice(0, limit).join("");
 }
@@ -31,6 +39,26 @@ function truncateCodePoints(value: string, limit: number): string {
 function duplicateName(name: string, locale: Locale): string {
   const suffix = locale === "zh-TW" ? " 副本" : " copy";
   return `${truncateCodePoints(name, PAGE_NAME_LIMIT - codePointLength(suffix))}${suffix}`;
+}
+
+function safelySetPointerCapture(target: HTMLButtonElement, pointerId: number): void {
+  if (typeof target.setPointerCapture !== "function") return;
+  try {
+    target.setPointerCapture(pointerId);
+  } catch {
+    // Pointer capture is an enhancement. Continue dragging if a browser rejects it.
+  }
+}
+
+function safelyReleasePointerCapture(target: HTMLButtonElement, pointerId: number): void {
+  if (typeof target.releasePointerCapture !== "function") return;
+  try {
+    if (typeof target.hasPointerCapture !== "function" || target.hasPointerCapture(pointerId)) {
+      target.releasePointerCapture(pointerId);
+    }
+  } catch {
+    // The pointer can already be released after cancellation or platform gesture handling.
+  }
 }
 
 export function PageManager({
@@ -49,7 +77,10 @@ export function PageManager({
   onClose,
 }: PageManagerProps) {
   const [draggedPageId, setDraggedPageId] = useState<string | null>(null);
+  const [dragTargetIndex, setDragTargetIndex] = useState<number | null>(null);
   const [renamingPageId, setRenamingPageId] = useState<string | null>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const pointerDragRef = useRef<PointerDragState | null>(null);
   const activePage = pages.find((page) => page.id === activePageId) ?? pages[0];
   const activeIndex = pages.findIndex((page) => page.id === activePage?.id);
   const [renameDraft, setRenameDraft] = useState(activePage?.name ?? "");
@@ -77,10 +108,75 @@ export function PageManager({
     setRenamingPageId(null);
   };
 
-  const handleDrop = (event: DragEvent<HTMLButtonElement>, toIndex: number) => {
+  const clearPointerDrag = () => {
+    pointerDragRef.current = null;
+    setDraggedPageId(null);
+    setDragTargetIndex(null);
+  };
+
+  const targetIndexAt = (clientY: number, fallback: number): number => {
+    const items = listRef.current?.querySelectorAll<HTMLElement>("[data-page-index]");
+    if (!items?.length) return fallback;
+
+    let closestIndex = fallback;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    items.forEach((item) => {
+      const index = Number.parseInt(item.dataset.pageIndex ?? "", 10);
+      if (!Number.isFinite(index)) return;
+      const bounds = item.getBoundingClientRect();
+      const distance = Math.abs(clientY - (bounds.top + bounds.height / 2));
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestIndex = index;
+      }
+    });
+    return closestIndex;
+  };
+
+  const startPointerDrag = (
+    event: JSX.TargetedPointerEvent<HTMLButtonElement>,
+    pageId: string,
+    sourceIndex: number,
+  ) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.focus();
+    safelySetPointerCapture(event.currentTarget, event.pointerId);
+    pointerDragRef.current = {
+      pageId,
+      pointerId: event.pointerId,
+      sourceIndex,
+      targetIndex: sourceIndex,
+    };
+    setDraggedPageId(pageId);
+    setDragTargetIndex(sourceIndex);
+  };
+
+  const movePointerDrag = (event: JSX.TargetedPointerEvent<HTMLButtonElement>) => {
+    const drag = pointerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const targetIndex = targetIndexAt(event.clientY, drag.targetIndex);
+    if (targetIndex === drag.targetIndex) return;
+    pointerDragRef.current = { ...drag, targetIndex };
+    setDragTargetIndex(targetIndex);
+  };
+
+  const finishPointerDrag = (event: JSX.TargetedPointerEvent<HTMLButtonElement>) => {
+    const drag = pointerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    pointerDragRef.current = null;
+    setDraggedPageId(null);
+    setDragTargetIndex(null);
+    safelyReleasePointerCapture(event.currentTarget, event.pointerId);
+    if (drag.targetIndex !== drag.sourceIndex) onMove(drag.pageId, drag.targetIndex);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLLIElement>, toIndex: number) => {
     event.preventDefault();
     if (draggedPageId) onMove(draggedPageId, toIndex);
     setDraggedPageId(null);
+    setDragTargetIndex(null);
   };
 
   return (
@@ -119,24 +215,41 @@ export function PageManager({
         </div>
       </div>
 
-      <ul class="page-list" aria-label={t("pages.title")}>
+      <ul class="page-list" aria-label={t("pages.title")} ref={listRef}>
         {pages.map((page, index) => (
-          <li key={page.id}>
+          <li
+            class={`page-list-item ${draggedPageId === page.id ? "is-pointer-dragging" : ""} ${dragTargetIndex === index ? "is-drag-target" : ""}`}
+            data-page-index={index}
+            key={page.id}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setDragTargetIndex(index);
+            }}
+            onDrop={(event) => handleDrop(event, index)}
+            style={{
+              alignItems: "center",
+              display: "grid",
+              gap: "4px",
+              gridTemplateColumns: "minmax(0, 1fr) 44px",
+            }}
+          >
             <button
               aria-current={page.id === activePageId ? "page" : undefined}
-              class={`page-row ${page.id === activePageId ? "is-active" : ""}`}
+              class={`page-row page-select-button ${page.id === activePageId ? "is-active" : ""}`}
               draggable
               onClick={() => onSelect(page.id)}
-              onDragEnd={() => setDraggedPageId(null)}
-              onDragOver={(event) => event.preventDefault()}
+              onDragEnd={() => {
+                setDraggedPageId(null);
+                setDragTargetIndex(null);
+              }}
               onDragStart={(event) => {
                 setDraggedPageId(page.id);
+                setDragTargetIndex(index);
                 if (event.dataTransfer) {
                   event.dataTransfer.effectAllowed = "move";
                   event.dataTransfer.setData("text/plain", page.id);
                 }
               }}
-              onDrop={(event) => handleDrop(event, index)}
               type="button"
             >
               <span class="page-index">{index + 1}</span>
@@ -144,6 +257,30 @@ export function PageManager({
               <span aria-hidden="true" class="menu-value">
                 {page.id === activePageId ? (locale === "zh-TW" ? "目前" : "Current") : ""}
               </span>
+            </button>
+            <button
+              aria-label={locale === "zh-TW" ? `拖曳排序 ${page.name}` : `Drag to reorder ${page.name}`}
+              class="icon-button page-drag-handle"
+              onClick={(event) => event.preventDefault()}
+              onLostPointerCapture={() => {
+                if (pointerDragRef.current?.pageId === page.id) clearPointerDrag();
+              }}
+              onPointerCancel={clearPointerDrag}
+              onPointerDown={(event) => startPointerDrag(event, page.id, index)}
+              onPointerMove={movePointerDrag}
+              onPointerUp={finishPointerDrag}
+              style={{
+                height: "44px",
+                minHeight: "44px",
+                minWidth: "44px",
+                padding: 0,
+                touchAction: "none",
+                width: "44px",
+              }}
+              title={locale === "zh-TW" ? "拖曳排序" : "Drag to reorder"}
+              type="button"
+            >
+              <Icon name="grip" />
             </button>
           </li>
         ))}

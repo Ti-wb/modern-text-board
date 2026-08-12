@@ -3,6 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 import { createDefaultPage } from "../domain/defaults";
 import { PageManager } from "./PageManager";
 
+function mockRect(top: number): DOMRect {
+  return {
+    bottom: top + 44,
+    height: 44,
+    left: 0,
+    right: 320,
+    top,
+    width: 320,
+    x: 0,
+    y: top,
+    toJSON: () => ({}),
+  };
+}
+
 function renderManager(pageCount = 2) {
   const pages = Array.from({ length: pageCount }, (_, index) =>
     createDefaultPage(`page-${index + 1}`, `Page ${index + 1}`)
@@ -70,5 +84,52 @@ describe("PageManager", () => {
     expect((screen.getByRole("button", { name: "Move down" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Delete" }) as HTMLButtonElement).disabled).toBe(true);
     expect(handlers.onDelete).not.toHaveBeenCalled();
+  });
+
+  it("reorders a page once on pointer release without requiring pointer capture support", () => {
+    const handlers = renderManager(3);
+    const rows = [...document.querySelectorAll<HTMLElement>("[data-page-index]")];
+    rows.forEach((row, index) => {
+      row.getBoundingClientRect = vi.fn(() => mockRect(index * 52));
+    });
+
+    const handle = screen.getByRole("button", { name: "Drag to reorder Page 1" });
+    Object.defineProperties(handle, {
+      hasPointerCapture: { configurable: true, value: undefined },
+      releasePointerCapture: { configurable: true, value: undefined },
+      setPointerCapture: { configurable: true, value: undefined },
+    });
+
+    fireEvent.pointerDown(handle, {
+      button: 0,
+      clientY: 22,
+      pointerId: 17,
+      pointerType: "touch",
+    });
+    fireEvent.pointerMove(handle, {
+      buttons: 1,
+      clientY: 126,
+      pointerId: 17,
+      pointerType: "touch",
+    });
+
+    expect(handlers.onMove).not.toHaveBeenCalled();
+
+    fireEvent.pointerUp(handle, {
+      button: 0,
+      clientY: 126,
+      pointerId: 17,
+      pointerType: "touch",
+    });
+    expect(handlers.onMove).toHaveBeenCalledOnce();
+    expect(handlers.onMove).toHaveBeenCalledWith("page-1", 2);
+
+    fireEvent.pointerUp(handle, {
+      button: 0,
+      clientY: 126,
+      pointerId: 17,
+      pointerType: "touch",
+    });
+    expect(handlers.onMove).toHaveBeenCalledOnce();
   });
 });

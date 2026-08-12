@@ -48,6 +48,7 @@ export function QrPanel({
 }: QrPanelProps) {
   const copy = COPY[locale];
   const [draft, setDraft] = useState(payload ?? "");
+  const [enableAttempted, setEnableAttempted] = useState(false);
   const bytes = utf8ByteLength(draft);
   const tooLong = bytes > LIMITS.maxQrPayloadBytes;
 
@@ -73,7 +74,19 @@ export function QrPanel({
           class={`switch ${enabled ? "is-on" : ""}`}
           role="switch"
           type="button"
-          onClick={() => onEnabledChange(!enabled)}
+          onClick={() => {
+            if (enabled) {
+              onEnabledChange(false);
+              return;
+            }
+            if (draft.length === 0 || tooLong) {
+              setEnableAttempted(true);
+              return;
+            }
+            onPayloadChange(draft);
+            onEnabledChange(true);
+            setEnableAttempted(false);
+          }}
         />
       </div>
       <p class="field-help">{copy.help}</p>
@@ -91,6 +104,7 @@ export function QrPanel({
         <span>{draft.length === 0 ? copy.empty : ""}</span>
         <span class={tooLong ? "error-text" : ""}>{bytes}/{LIMITS.maxQrPayloadBytes} {copy.bytes}</span>
       </div>
+      {enableAttempted && draft.length === 0 ? <p class="error-text" role="alert">{copy.empty}</p> : null}
       {tooLong ? <p class="error-text" role="alert">{copy.tooLong}</p> : null}
       <div class="button-row">
         <button class="primary-button" disabled={tooLong || draft.length === 0} type="button" onClick={commit}>

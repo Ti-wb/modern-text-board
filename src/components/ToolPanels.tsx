@@ -64,6 +64,7 @@ export interface ToolPanelsProps {
   locale: Locale;
   kind: ToolPanelKind | null;
   edge: ToolbarEdge;
+  offsetRatio: number;
   onClose: () => void;
   font: FontPanelControls;
   color: ColorPanelControls;
@@ -231,6 +232,7 @@ const FOCUSABLE =
 function PanelFrame({
   kind,
   edge,
+  offsetRatio,
   title,
   closeLabel,
   wide = false,
@@ -239,6 +241,7 @@ function PanelFrame({
 }: {
   kind: ToolPanelKind;
   edge: ToolbarEdge;
+  offsetRatio: number;
   title: string;
   closeLabel: string;
   wide?: boolean;
@@ -285,7 +288,7 @@ function PanelFrame({
   return (
     <>
       <div aria-hidden="true" class="panel-scrim" onClick={onClose} />
-      <div class={`tool-panel-wrap edge-${edge}`}>
+      <div class={`tool-panel-wrap edge-${edge}`} style={`--toolbar-offset: ${offsetRatio}`}>
         <section
           aria-labelledby={titleId}
           aria-modal="true"
@@ -662,6 +665,7 @@ export function ToolPanels({
   locale,
   kind,
   edge,
+  offsetRatio,
   onClose,
   font,
   color,
@@ -683,6 +687,7 @@ export function ToolPanels({
     <PanelFrame
       closeLabel={copy.close}
       edge={edge}
+      offsetRatio={offsetRatio}
       kind={kind}
       onClose={onClose}
       title={titles[kind]}
