@@ -2,7 +2,55 @@
 
 `modern-text-board` 是一個為 iPhone、iPad 與筆電設計的純前端文字白板。除了 text board，也適合直接拿在手上當作 handheld sign、handheld board、接機牌、活動提示牌或無聲溝通板使用。
 
-所有文字、頁面與偏好都留在目前瀏覽器；不需要帳號、API 或後端服務。第一次成功載入並完成快取後，核心功能可以離線使用。
+不需要帳號、API 或後端服務；文字、頁面與偏好只保存在目前瀏覽器。第一次成功載入並完成快取後，核心功能可以離線使用。
+
+## 主要功能
+
+- 文字排版：黑／白背景、四種系統字型、24–200px 字級、四種粗細、左／中／右對齊、自動縮字。
+- 文字顏色：Basic、Neon、Pastel 色票、自訂 Hex 與自動對比；低對比時提示但不阻止套用。
+- 展示效果：四向跑馬燈、10 段速度、柔和閃爍、文字鏡像，以及不清除設定的「暫停所有動態」。
+- 本機 QR Code：可顯示文字或網址，內容與白板文字分開保存，不會上傳至伺服器。
+- 多頁白板：新增、複製、改名、拖曳排序、上移、下移、刪除與前後切換，最多 50 頁。
+- 展示模式：先使用 CSS 展示模式，再漸進啟用瀏覽器 Fullscreen；可選擇在展示時保持螢幕常亮。
+- 本機資料：自動儲存、跨分頁衝突提示、JSON 匯入預覽／匯出備份與二次確認重設。
+- PWA：可安裝、離線啟動、由使用者確認更新；介面支援繁體中文與 English。
+- 鍵盤與觸控：焦點管理、44×44px 最小點擊區、畫布滑動換頁，且不禁止 pinch zoom。
+
+## 使用方式
+
+1. 在畫布空白處用滑鼠雙擊，或在觸控螢幕快速點兩下，即可編輯文字。
+2. 編輯器保留換行與空白；按「套用」保存，按「取消」放棄草稿。
+3. 使用底部／浮動工具列切換主題、字型、顏色、對齊、粗體與跑馬燈。
+4. 在「更多」中設定鏡像、閃爍、QR Code、頁面、全螢幕展示與其他偏好。
+5. 畫布左右滑動可快速切頁；頁面面板與鍵盤操作是完整的替代操作方式。
+
+### 鍵盤快捷鍵
+
+| 按鍵 | 功能 |
+| --- | --- |
+| `E` 或 `Enter` | 編輯文字 |
+| `B` | 切換粗體 |
+| `M` | 切換跑馬燈 |
+| `F` | 進入／離開展示模式 |
+| `Page Up` / `Page Down` | 上一頁／下一頁 |
+| `Esc` | 關閉面板、取消編輯或離開展示 |
+| `?` | 顯示快捷鍵說明 |
+| 編輯時 `Cmd/Ctrl + Enter` | 套用文字 |
+
+游標位於輸入欄位或文字編輯器時，全域字母快捷鍵會暫停，避免干擾輸入與中文 IME。
+
+## RWD 與支援裝置
+
+版面會依「可用寬度與高度」而不只依裝置名稱調整，因此也適用 iPad Split View、Stage Manager、手機橫向與軟鍵盤開啟時的畫面。
+
+| 狀態 | 版面行為 | 常見情境 |
+| --- | --- | --- |
+| Compact：寬度小於 640px，或高度小於 520px | 工具列固定底部並可橫向捲動；面板改為全寬 bottom sheet | iPhone、窄 Split View、低高度手機橫向 |
+| Regular：寬度至少 640px 且高度至少 520px | 浮動工具列與定位 popover；工具列可拖曳並吸附頂部或底部 | iPad、筆電、桌面瀏覽器 |
+| QR 容器至少 720px 且高度至少 420px | 文字與 QR 左右排列 | iPad／筆電寬版 |
+| QR 容器較窄或高度不足 | 文字與 QR 上下排列 | 手機與窄視窗 |
+
+畫布使用 dynamic viewport、safe-area 與 VisualViewport 資訊；旋轉裝置、Safari 工具列伸縮或軟鍵盤改變可用空間時會重新計算。網站不鎖定方向，也不全域攔截觸控捲動。
 
 ## 本機開發
 
@@ -19,7 +67,13 @@ npm run dev
 npm run test       # Vitest 單元與元件測試
 npm run test:e2e   # Playwright 瀏覽器測試
 npm run build      # TypeScript 檢查與 production build
-npm run check      # lint、測試與 build 完整 gate
+npm run check      # ESLint、Vitest 單元／元件測試與 build
+```
+
+第一次執行 E2E 前，請先安裝 Playwright 瀏覽器：
+
+```bash
+npx playwright install
 ```
 
 Production 預覽：
@@ -30,6 +84,27 @@ npm run preview
 ```
 
 > Service Worker 預設只在 production build 註冊。若要驗證安裝、離線啟動或更新提示，請使用 `npm run build && npm run preview`，不要只使用 dev server。
+
+## 專案結構
+
+- `src/components/`：畫布、工具列、面板、編輯器、QR、頁面與通知 UI。
+- `src/domain/`：型別、預設資料、限制、reducer、schema 驗證與匯入／匯出。
+- `src/hooks/`：自動縮字、本機儲存與跨分頁同步。
+- `src/platform/`：Fullscreen、Wake Lock 與 PWA 瀏覽器能力封裝。
+- `e2e/`：多尺寸、互動、離線與 Figma 視覺基準測試。
+- `public/_headers`：Cloudflare Pages 的安全標頭與快取規則。
+
+應用程式採 Preact、Vite、TypeScript、CSS Custom Properties、container queries 與 `useReducer`；沒有 Router、大型狀態庫、Tailwind 或伺服器端 runtime。
+
+## 資料、限制與瀏覽器能力
+
+- 每頁文字最多 2,000 個 Unicode code points；頁名最多 60 個；QR 內容最多 512 UTF-8 bytes。
+- Workspace 序列化後最多 512 KiB；匯入檔最多 1 MiB；至少保留一頁。
+- 資料只保存在目前瀏覽器／安裝的 Web App。Safari 分頁與加入主畫面的 Web App 可能使用不同儲存空間；清除網站資料也會移除內容。重要資料請定期匯出 JSON 備份。
+- 若 localStorage 因 quota、私人模式或瀏覽器政策而失敗，程式會繼續在記憶體中運作並顯示未儲存警告。
+- Fullscreen 與 Screen Wake Lock 都是漸進增強。Fullscreen 被拒絕時仍保留 CSS 展示模式；Wake Lock 不支援、權限遭拒或頁面進入背景時，不影響其他功能。
+- Wake Lock 需要安全來源（HTTPS；localhost 僅供開發），並可能被作業系統省電策略釋放。頁面回到前景後會依偏好重新請求。
+- PWA 更新採 prompt 模式；套用新版前會先同步保存目前內容，只有使用者確認後才重新載入。
 
 ## Cloudflare Pages 部署
 
@@ -46,29 +121,19 @@ npm run preview
 | Root directory | 留空（repository 根目錄） |
 | Node.js | 22 |
 
-`public/_headers` 會隨 build 複製到 `dist/_headers`，提供 CSP、Permissions Policy 與正確的快取策略：只有帶內容雜湊的 `/assets/*` 長效快取；HTML、manifest 與 Service Worker 每次重新驗證。專案不需要 `_redirects`，也不應加入全域 SPA rewrite。
+`public/_headers` 會隨 build 複製到 `dist/_headers`，提供 CSP、Permissions Policy 與正確快取策略：只有帶內容雜湊的 `/assets/*` 長效快取；HTML、manifest 與 Service Worker 每次重新驗證。專案不需要 `_redirects`，也不應加入全域 SPA rewrite。
 
-部署後請確認：
+部署後建議確認：
 
 1. HTTPS 頁面可以進入展示／全螢幕模式。
 2. 啟用「保持螢幕常亮」後，只有在展示中且頁面可見時顯示為實際啟用。
-3. 線上載入一次並看到「已可離線使用」後，飛航模式重新開啟仍能編輯與產生 QR Code。
-4. 發布新版本時先顯示更新提示；只有按下「更新並重新載入」才啟用新版，不會自動中斷目前內容。
-
-## 瀏覽器能力與資料說明
-
-- Fullscreen 與 Screen Wake Lock 都是漸進增強。Fullscreen 被拒絕時仍保留 CSS 展示模式；Wake Lock 不支援、權限遭拒或頁面進入背景時，不影響白板其他功能。
-- Wake Lock 需要安全來源（HTTPS；localhost 僅供開發），並可能被作業系統的省電策略釋放。頁面回到前景後會依使用者偏好重新請求。
-- 資料只保存在目前瀏覽器／安裝的 Web App。Safari 分頁與加入主畫面的 Web App 可能使用不同儲存空間；清除網站資料也會移除內容。重要資料請定期匯出 JSON 備份。
-- PWA 更新採 prompt 模式。套用新版前，呼叫端可透過 `beforeApplyUpdate` 先同步保存尚未寫入的內容。
-
-## 平台模組
-
-- `src/platform/fullscreen.ts`：CSS 展示模式、原生 Fullscreen 漸進增強與狀態訂閱。
-- `src/platform/wake-lock.ts`：只在「使用者已啟用＋展示中＋頁面可見＋安全來源」時持有 Screen Wake Lock，並提供 Preact hook。
-- `src/platform/pwa.ts`：離線就緒、離線、更新可用與註冊錯誤狀態；更新一定由使用者操作觸發。
-- `src/components/PwaStatus.tsx`：可直接使用的中英雙語狀態與更新提示。
+3. 線上載入一次並看到「已可完整離線使用」後，飛航模式重新開啟仍能編輯與產生 QR Code。
+4. 發布新版本時先顯示更新提示；只有按下「更新並重新載入」才啟用新版。
 
 ## 隱私與網路
 
 Production runtime 不載入第三方字型、分析工具或遠端資源。QR Code 在瀏覽器本機產生；專案也不會把白板內容上傳到任何服務。
+
+## 授權
+
+本專案以 [GNU General Public License v3.0 only](./LICENSE) 授權，SPDX identifier 為 `GPL-3.0-only`。散布本專案或其修改版本時，請依 GPLv3 保留授權聲明並提供對應原始碼；本軟體不提供任何擔保。
