@@ -59,41 +59,6 @@ export interface PreferencesV2 {
   pauseAnimations: boolean;
 }
 
-export interface ExportV2 {
-  format: "simple-white-board";
-  schemaVersion: 2;
-  exportedAt: string;
-  workspace: WorkspaceV2;
-  preferences: PreferencesV2;
-}
-
-export interface WorkspaceStorageEnvelopeV2 {
-  format: "simple-white-board/local-workspace";
-  schemaVersion: 2;
-  revision: number;
-  savedAt: string;
-  writerId: string;
-  workspace: WorkspaceV2;
-}
-
-export interface PreferencesStorageEnvelopeV2 {
-  format: "simple-white-board/local-preferences";
-  schemaVersion: 2;
-  revision: number;
-  savedAt: string;
-  writerId: string;
-  preferences: PreferencesV2;
-}
-
-export interface ImportTransactionJournalV2 {
-  format: "simple-white-board/import-transaction";
-  schemaVersion: 2;
-  transactionId: string;
-  createdAt: string;
-  previousWorkspace: string | null;
-  previousPreferences: string | null;
-}
-
 export type WorkspaceAction =
   | { type: "workspace/replace"; workspace: WorkspaceV2 }
   | { type: "page/add"; id: string; name: string; afterPageId?: string }

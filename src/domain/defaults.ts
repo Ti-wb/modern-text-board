@@ -5,15 +5,11 @@ import type {
   WorkspaceV2,
 } from "./types";
 
-export const SCHEMA_VERSION = 2 as const;
-
 export const LIMITS = Object.freeze({
   maxPages: 50,
   maxPageNameCodePoints: 60,
   maxTextCodePoints: 2_000,
   maxQrPayloadBytes: 512,
-  maxWorkspaceBytes: 512 * 1024,
-  maxImportFileBytes: 1024 * 1024,
   minFontSizePx: 24,
   maxFontSizePx: 200,
   minFontScalePercent: 5,
@@ -22,12 +18,6 @@ export const LIMITS = Object.freeze({
   minMarqueeSpeed: 1,
   maxMarqueeSpeed: 40,
   marqueeSpeedStep: 0.1,
-});
-
-export const STORAGE_KEYS = Object.freeze({
-  workspace: "simple-white-board.workspace",
-  preferences: "simple-white-board.preferences",
-  importTransaction: "simple-white-board.import-transaction",
 });
 
 export const DEFAULT_PAGE_NAMES: Record<Locale, string> = {

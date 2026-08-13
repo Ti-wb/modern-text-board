@@ -600,7 +600,7 @@ test("low-height compact QR stays square and contained", async ({ page }, testIn
   await expectQrSizing(page, payload, 168);
 });
 
-test("toolbar drags freely, clamps, persists, and idles smoothly", async ({
+test("toolbar drags freely, clamps, and idles smoothly", async ({
   page,
 }, testInfo) => {
   skipUnlessToolbarProject(testInfo);
@@ -632,26 +632,7 @@ test("toolbar drags freely, clamps, persists, and idles smoothly", async ({
   });
   await expectWithinViewport(page, ".toolbar-shell");
 
-  const persistedBeforeReload = await dragToolbarCenterTo(page, desired);
-  await expect.poll(async () => page.evaluate(() => {
-    const raw = localStorage.getItem("simple-white-board.preferences");
-    if (!raw) return null;
-    const stored = JSON.parse(raw) as {
-      preferences?: { toolbar?: { verticalOffsetRatio?: number } };
-    };
-    return stored.preferences?.toolbar?.verticalOffsetRatio ?? null;
-  }), { timeout: 2_000 }).toBeCloseTo(desired.y / viewport.height, 2);
-
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(toolbarShell).toBeVisible();
-  await expect.poll(async () => (await toolbarCenter(page)).x).toBeCloseTo(
-    persistedBeforeReload.x,
-    0,
-  );
-  await expect.poll(async () => (await toolbarCenter(page)).y).toBeCloseTo(
-    persistedBeforeReload.y,
-    0,
-  );
+  await dragToolbarCenterTo(page, desired);
 
   await page.clock.install();
   await page.reload({ waitUntil: "domcontentloaded" });

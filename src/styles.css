@@ -83,8 +83,7 @@ select:focus-visible,
 
 html[data-presentation="true"] .toolbar-shell,
 html[data-presentation="true"] .edit-hint,
-html[data-presentation="true"] .page-indicator,
-html[data-presentation="true"] .save-indicator {
+html[data-presentation="true"] .page-indicator {
   pointer-events: none;
   opacity: 0;
 }
@@ -362,8 +361,7 @@ html[data-presentation="true"] .save-indicator {
   will-change: opacity;
 }
 
-.page-indicator,
-.save-indicator {
+.page-indicator {
   position: fixed;
   z-index: 12;
   display: inline-flex;
@@ -384,19 +382,6 @@ html[data-presentation="true"] .save-indicator {
 .page-indicator {
   right: var(--safe-right);
   bottom: calc(var(--safe-bottom) + 24px);
-}
-
-.save-indicator {
-  bottom: calc(var(--safe-bottom) + 24px);
-  left: var(--safe-left);
-}
-
-.save-indicator.is-error {
-  background: rgba(150, 25, 18, 0.86);
-}
-
-.save-indicator[hidden] {
-  display: none;
 }
 
 .presentation-exit {
@@ -837,8 +822,7 @@ input[type="range"] {
 
 .text-input,
 .select-input,
-.textarea-input,
-.file-input-label {
+.textarea-input {
   width: 100%;
   min-height: 44px;
   padding: 10px 12px;
@@ -861,8 +845,7 @@ input[type="range"] {
 
 .field-help,
 .warning-text,
-.error-text,
-.storage-note {
+.error-text {
   margin: 7px 0 0;
   color: #a9a9ae;
   font-size: 12px;
@@ -1151,49 +1134,6 @@ kbd {
   font: 12px ui-monospace, monospace;
 }
 
-.file-input-label {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: auto;
-  cursor: pointer;
-}
-
-.file-input-label input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-}
-
-.file-input-label:focus-within {
-  outline: 3px solid rgba(0, 122, 255, 0.78);
-  outline-offset: 2px;
-}
-
-.import-summary {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-}
-
-.import-summary div {
-  display: grid;
-  grid-template-columns: 120px minmax(0, 1fr);
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--panel-line);
-}
-
-.import-summary dt {
-  color: var(--muted);
-}
-
-.import-summary dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 @container board (min-width: 720px) and (min-height: 420px) {
   .board-layout.has-qr {
     grid-template-columns: minmax(0, 1fr) minmax(192px, min(34cqw, 320px));
@@ -1223,13 +1163,8 @@ kbd {
     scrollbar-width: none;
   }
 
-  .page-indicator,
-  .save-indicator {
+  .page-indicator {
     bottom: calc(var(--safe-bottom) + 68px);
-  }
-
-  .save-indicator:not(.is-error) {
-    display: none;
   }
 
   .toolbar::-webkit-scrollbar {

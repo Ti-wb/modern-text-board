@@ -2,7 +2,6 @@ import type { JSX } from "preact";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "preact/hooks";
 
 import { BoardCanvas } from "./components/BoardCanvas";
-import { ImportPreview } from "./components/ImportPreview";
 import { OverlayFrame } from "./components/OverlayFrame";
 import { PageManager } from "./components/PageManager";
 import { PwaStatus } from "./components/PwaStatus";
@@ -19,15 +18,8 @@ import {
   createId
 } from "./domain/defaults";
 import { getActivePage, preferencesReducer, workspaceReducer } from "./domain/reducer";
-import {
-  createExport,
-  hydrateDomainData,
-  parseImport,
-  serializeExport
-} from "./domain/storage";
-import type { ExportV2, Locale } from "./domain/types";
+import type { Locale } from "./domain/types";
 import { applyDocumentLocale, getTranslator, resolveLocale } from "./i18n";
-import { useDomainPersistence } from "./hooks/useDomainPersistence";
 import {
   exitPresentationFullscreen,
   requestPresentationFullscreen,
@@ -93,7 +85,10 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
 export function App() {
   const initial = useMemo(() => {
     const locale = resolveLocale();
-    return hydrateDomainData(locale);
+    return {
+      workspace: createDefaultWorkspace(locale),
+      preferences: createDefaultPreferences(locale),
+    };
   }, []);
   const [workspace, dispatchWorkspace] = useReducer(workspaceReducer, initial.workspace);
   const [preferences, dispatchPreferences] = useReducer(preferencesReducer, initial.preferences);
@@ -101,7 +96,6 @@ export function App() {
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [editing, setEditing] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [importPreview, setImportPreview] = useState<ExportV2 | null>(null);
   const [presentation, setPresentation] = useState(false);
   const [effectiveSize, setEffectiveSize] = useState(80);
   const [maxFittingSize, setMaxFittingSize] = useState(80);
@@ -123,29 +117,7 @@ export function App() {
   const pageIndex = workspace.pages.findIndex((item) => item.id === page.id);
   const locale = preferences.locale;
   const t = useMemo(() => getTranslator(locale), [locale]);
-
-  const applyRemoteWorkspace = useCallback((remote: typeof workspace) => {
-    dispatchWorkspace({ type: "workspace/replace", workspace: remote });
-  }, []);
-  const applyRemotePreferences = useCallback((remote: typeof preferences) => {
-    dispatchPreferences({ type: "preferences/replace", preferences: remote });
-  }, []);
-  const persistence = useDomainPersistence({
-    workspace,
-    preferences,
-    initialWorkspaceRevision: initial.workspaceRevision,
-    initialPreferencesRevision: initial.preferencesRevision,
-    hydrated: initial.autosaveAllowed,
-    onRemoteWorkspace: applyRemoteWorkspace,
-    onRemotePreferences: applyRemotePreferences
-  });
-  const pwa = usePwaStatus({
-    beforeApplyUpdate: () => {
-      if (!persistence.flush()) {
-        throw new Error("Could not persist changes before updating");
-      }
-    }
-  });
+  const pwa = usePwaStatus();
   const wakeLock = useWakeLock({
     enabled: preferences.keepScreenAwake,
     presentationActive: presentation
@@ -159,10 +131,9 @@ export function App() {
   const closeTransientUi = useCallback(() => {
     if (editing) setEditing(false);
     else if (shortcutsOpen) setShortcutsOpen(false);
-    else if (importPreview) setImportPreview(null);
     else if (overlay) setOverlay(null);
     else if (panel) setPanel(null);
-  }, [editing, importPreview, overlay, panel, shortcutsOpen]);
+  }, [editing, overlay, panel, shortcutsOpen]);
   const closePanel = useCallback(() => setPanel(null), []);
   const closeOverlay = useCallback(() => setOverlay(null), []);
 
@@ -188,7 +159,6 @@ export function App() {
     panel !== null ||
     overlay !== null ||
     shortcutsOpen ||
-    importPreview !== null ||
     presentation ||
     toolbarDragging ||
     toolbarHovered ||
@@ -275,7 +245,7 @@ export function App() {
       activateToolbar();
       if (event.key === "Escape" && (event.isComposing || event.keyCode === 229)) return;
       if (event.key === "Escape") {
-        if (editing || shortcutsOpen || importPreview || overlay || panel) closeTransientUi();
+        if (editing || shortcutsOpen || overlay || panel) closeTransientUi();
         else if (presentation) void exitPresentation();
         return;
       }
@@ -285,7 +255,7 @@ export function App() {
         setShortcutsOpen(true);
         return;
       }
-      if (editing || shortcutsOpen || importPreview || overlay || panel) return;
+      if (editing || shortcutsOpen || overlay || panel) return;
       const key = event.key.toLowerCase();
       if (key === "e" || event.key === "Enter") {
         event.preventDefault();
@@ -311,7 +281,7 @@ export function App() {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [activateToolbar, closeTransientUi, editing, exitPresentation, importPreview, overlay, page, panel, presentation, shortcutsOpen, togglePresentation]);
+  }, [activateToolbar, closeTransientUi, editing, exitPresentation, overlay, page, panel, presentation, shortcutsOpen, togglePresentation]);
 
   const finishToolbarDrag = useCallback((pointerId?: number) => {
     const drag = dragStateRef.current;
@@ -395,62 +365,12 @@ export function App() {
     setOverlay(next);
   };
 
-  const handleExport = () => {
-    try {
-      const contents = serializeExport(createExport(workspace, preferences));
-      const blob = new Blob([contents], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `modern-text-board-${new Date().toISOString().slice(0, 10)}.json`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-      notify(t("export.success"));
-    } catch {
-      notify(locale === "zh-TW" ? "無法匯出備份" : "Could not export backup", true);
-    }
-  };
-
-  const handleImport = async (file: File) => {
-    if (file.size > LIMITS.maxImportFileBytes) {
-      notify(t("import.tooLarge"), true);
-      return;
-    }
-    const result = parseImport(await file.text());
-    if (!result.success) {
-      notify(
-        result.error.code === "unsupported_version" ? t("import.unsupported") : t("import.invalid"),
-        true
-      );
-      return;
-    }
-    setImportPreview(result.data);
-  };
-
-  const confirmImport = () => {
-    if (!importPreview) return;
-    const result = persistence.commitReplacement(importPreview);
-    if (!result.success) {
-      notify(t("import.invalid"), true);
-      return;
-    }
-    setImportPreview(null);
-    setOverlay(null);
-    notify(t("import.success"));
-  };
-
   const resetAll = () => {
     const nextLocale: Locale = preferences.locale;
     const nextWorkspace = createDefaultWorkspace(nextLocale);
     const nextPreferences = createDefaultPreferences(nextLocale);
-    const result = persistence.commitReplacement(createExport(nextWorkspace, nextPreferences));
-    if (!result.success) {
-      dispatchWorkspace({ type: "workspace/replace", workspace: nextWorkspace });
-      dispatchPreferences({ type: "preferences/replace", preferences: nextPreferences });
-      setOverlay(null);
-      notify(t("storage.failed"), true);
-      return;
-    }
+    dispatchWorkspace({ type: "workspace/replace", workspace: nextWorkspace });
+    dispatchPreferences({ type: "preferences/replace", preferences: nextPreferences });
     setOverlay(null);
     notify(locale === "zh-TW" ? "已重設" : "Reset complete");
   };
@@ -500,9 +420,6 @@ export function App() {
 
       {!presentation ? (
         <>
-          <span class="save-indicator is-error" hidden={!persistence.saveFailed} role="alert">
-            {t("storage.failed")}
-          </span>
           <span class="page-indicator" aria-live="polite">
             {t("pages.pageCount", { current: pageIndex + 1, total: workspace.pages.length })}
           </span>
@@ -642,8 +559,6 @@ export function App() {
               locale={locale}
               onApplyPwaUpdate={() => void pwa.applyUpdate()}
               onClose={closeOverlay}
-              onExport={handleExport}
-              onImport={(file) => void handleImport(file)}
               onInstallPwa={() => void pwa.install()}
               onKeepScreenAwakeChange={(keepScreenAwake) => dispatchPreferences({ type: "preferences/set-keep-awake", keepScreenAwake })}
               onLocaleChange={(nextLocale) => dispatchPreferences({ type: "preferences/set-locale", locale: nextLocale })}
@@ -652,8 +567,6 @@ export function App() {
               onShowShortcuts={() => setShortcutsOpen(true)}
               pauseAnimations={preferences.pauseAnimations}
               pwaStatus={pwaSettings}
-              storageError={!persistence.persistenceEnabled ? t("storage.corrupt") : persistence.saveFailed ? t("storage.failed") : null}
-              storageMode={!persistence.persistenceEnabled || persistence.saveFailed ? "memory" : "local"}
               wakeLockStatus={wakeLock}
             />
           ) : null}
@@ -686,25 +599,6 @@ export function App() {
         </button>
       ) : null}
       {shortcutsOpen ? <ShortcutHelp locale={locale} onClose={() => setShortcutsOpen(false)} /> : null}
-      {importPreview ? (
-        <ImportPreview
-          data={importPreview}
-          locale={locale}
-          onCancel={() => setImportPreview(null)}
-          onConfirm={confirmImport}
-        />
-      ) : null}
-      {persistence.workspaceStatus.status === "conflict" ? (
-        <div class="toast-stack">
-          <div class="toast" role="alert">
-            {t("storage.conflict")}
-            <div class="toast-actions">
-              <button class="secondary-button" type="button" onClick={() => persistence.resolveConflict("remote")}>{t("storage.useRemote")}</button>
-              <button class="primary-button" type="button" onClick={() => persistence.resolveConflict("local")}>{t("storage.keepLocal")}</button>
-            </div>
-          </div>
-        </div>
-      ) : null}
       {toast ? (
         <div class="toast-stack">
           <div class={`toast ${toast.error ? "is-error" : ""}`} role={toast.error ? "alert" : "status"}>{toast.message}</div>

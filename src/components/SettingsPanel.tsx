@@ -33,17 +33,11 @@ export interface SettingsPanelProps {
     "active" | "supported" | "phase" | "reason"
   >;
   pwaStatus: SettingsPwaStatus;
-  storageMode?: "local" | "memory";
-  storageError?: string | null;
   appVersion?: string;
-  importDisabled?: boolean;
-  exportDisabled?: boolean;
   onClose: () => void;
   onLocaleChange: (locale: Locale) => void;
   onKeepScreenAwakeChange: (enabled: boolean) => void;
   onPauseAnimationsChange: (enabled: boolean) => void;
-  onExport: () => void;
-  onImport: (file: File) => void;
   onReset: () => void;
   onShowShortcuts: () => void;
   onInstallPwa?: () => void;
@@ -61,13 +55,6 @@ interface Copy {
   keepAwakeHelp: string;
   pauseAnimations: string;
   pauseAnimationsHelp: string;
-  data: string;
-  localOnly: string;
-  localStorage: string;
-  memoryOnly: string;
-  export: string;
-  import: string;
-  importHelp: string;
   app: string;
   network: string;
   online: string;
@@ -105,14 +92,6 @@ const COPY: Record<Locale, Copy> = {
     keepAwakeHelp: "只在展示模式且頁面可見時嘗試啟用。",
     pauseAnimations: "暫停所有動態",
     pauseAnimationsHelp: "暫停跑馬燈與閃爍，設定不會被清除。",
-    data: "資料與備份",
-    localOnly:
-      "文字與設定只保存在目前瀏覽器或安裝的 Web App。Safari 與主畫面 App 的資料可能彼此分開，也可能被系統清除；重要內容請定期匯出備份。",
-    localStorage: "已儲存在此瀏覽器",
-    memoryOnly: "目前僅保留在記憶體",
-    export: "匯出備份",
-    import: "匯入備份",
-    importHelp: "匯入前會先驗證，確認後才會完整取代目前資料。檔案上限 1 MiB。",
     app: "離線與 App",
     network: "網路狀態",
     online: "線上",
@@ -125,11 +104,11 @@ const COPY: Record<Locale, Copy> = {
     shortcuts: "鍵盤快捷鍵",
     shortcutsHelp: "查看編輯、效果、換頁與全螢幕快捷鍵。",
     version: "版本",
-    reset: "重設所有內容",
-    resetHelp: "清除目前所有頁面與偏好設定，並建立一個新的空白頁。",
+    reset: "重設本次內容",
+    resetHelp: "清除目前工作階段的頁面與偏好，並建立一個新的空白頁。",
     resetTitle: "確定要重設嗎？",
     resetDescription:
-      "這會刪除目前瀏覽器內的所有白板內容與設定。這個動作無法復原，建議先匯出備份。",
+      "這會清除目前工作階段的所有白板內容與設定。這個動作無法復原。",
     cancel: "取消",
     confirmReset: "確認重設",
     wake: {
@@ -179,14 +158,6 @@ const COPY: Record<Locale, Copy> = {
     keepAwakeHelp: "Only attempted while presenting and this page is visible.",
     pauseAnimations: "Pause all motion",
     pauseAnimationsHelp: "Pause marquee and flash without clearing their settings.",
-    data: "Data & backup",
-    localOnly:
-      "Text and settings stay only in this browser or installed Web App. Safari and Home Screen apps may keep separate data, and the system may remove it. Export important boards regularly.",
-    localStorage: "Saved in this browser",
-    memoryOnly: "Currently kept in memory only",
-    export: "Export backup",
-    import: "Import backup",
-    importHelp: "The file is validated first and replaces current data only after confirmation. Maximum size: 1 MiB.",
     app: "Offline & app",
     network: "Network",
     online: "Online",
@@ -199,11 +170,11 @@ const COPY: Record<Locale, Copy> = {
     shortcuts: "Keyboard shortcuts",
     shortcutsHelp: "View shortcuts for editing, effects, pages, and fullscreen.",
     version: "Version",
-    reset: "Reset everything",
-    resetHelp: "Clear all pages and preferences, then create one new blank page.",
-    resetTitle: "Reset everything?",
+    reset: "Reset this session",
+    resetHelp: "Clear this session's pages and preferences, then create one new blank page.",
+    resetTitle: "Reset this session?",
     resetDescription:
-      "This deletes every board and setting stored in this browser. It cannot be undone. Export a backup first if you need one.",
+      "This clears every board and setting in the current session. It cannot be undone.",
     cancel: "Cancel",
     confirmReset: "Reset everything",
     wake: {
@@ -288,17 +259,11 @@ export function SettingsPanel({
   pauseAnimations,
   wakeLockStatus,
   pwaStatus,
-  storageMode = "local",
-  storageError = null,
   appVersion,
-  importDisabled = false,
-  exportDisabled = false,
   onClose,
   onLocaleChange,
   onKeepScreenAwakeChange,
   onPauseAnimationsChange,
-  onExport,
-  onImport,
   onReset,
   onShowShortcuts,
   onInstallPwa,
@@ -371,48 +336,6 @@ export function SettingsPanel({
             onChange={onPauseAnimationsChange}
           />
         </div>
-
-        <div class="panel-divider" />
-        <span class="section-label">{copy.data}</span>
-        <p class="storage-note">{copy.localOnly}</p>
-        <p
-          class={storageMode === "memory" ? "warning-text" : "field-help"}
-          role={storageMode === "memory" ? "alert" : "status"}
-        >
-          {storageMode === "memory" ? copy.memoryOnly : copy.localStorage}
-          {storageError ? ` — ${storageError}` : ""}
-        </p>
-        <div class="button-row">
-          <button
-            type="button"
-            class="secondary-button"
-            disabled={exportDisabled}
-            onClick={onExport}
-          >
-            {copy.export}
-          </button>
-          <label
-            class="file-input-label"
-            aria-disabled={importDisabled}
-            aria-describedby="settings-import-help"
-          >
-            {copy.import}
-            <input
-              type="file"
-              accept="application/json,.json"
-              disabled={importDisabled}
-              onChange={(event) => {
-                const input = event.currentTarget;
-                const file = input.files?.[0];
-                if (file) onImport(file);
-                input.value = "";
-              }}
-            />
-          </label>
-        </div>
-        <p class="field-help" id="settings-import-help">
-          {copy.importHelp}
-        </p>
 
         <div class="panel-divider" />
         <span class="section-label">{copy.app}</span>

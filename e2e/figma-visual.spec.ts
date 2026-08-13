@@ -95,7 +95,6 @@ test.beforeEach(async ({ page }, testInfo) => {
   skipOutsideFigmaViewport(testInfo);
 
   await page.addInitScript(() => {
-    localStorage.clear();
     sessionStorage.clear();
     Object.defineProperty(navigator, "language", {
       configurable: true,
