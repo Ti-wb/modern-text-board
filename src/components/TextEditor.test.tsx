@@ -8,7 +8,7 @@ function renderEditor(overrides = {}) {
     fontScalePercent: null,
     fitOverflow: false,
     locale: "en" as const,
-    maxCodePoints: 2_000,
+    maxCodePoints: 350,
     maxFontSizePx: 80,
     onApply: vi.fn(),
     onCancel: vi.fn(),

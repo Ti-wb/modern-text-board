@@ -64,6 +64,9 @@ interface Copy {
   update: string;
   installAction: string;
   updateAction: string;
+  updateTitle: string;
+  updateDescription: string;
+  confirmUpdate: string;
   shortcuts: string;
   shortcutsHelp: string;
   version: string;
@@ -101,6 +104,10 @@ const COPY: Record<Locale, Copy> = {
     update: "版本更新",
     installAction: "安裝",
     updateAction: "更新並重新載入",
+    updateTitle: "更新並重新載入？",
+    updateDescription:
+      "重新載入會清除目前工作階段的所有白板內容與設定。這個動作無法復原。",
+    confirmUpdate: "確認更新",
     shortcuts: "鍵盤快捷鍵",
     shortcutsHelp: "查看編輯、效果、換頁與全螢幕快捷鍵。",
     version: "版本",
@@ -167,6 +174,10 @@ const COPY: Record<Locale, Copy> = {
     update: "Updates",
     installAction: "Install",
     updateAction: "Update and reload",
+    updateTitle: "Update and reload?",
+    updateDescription:
+      "Reloading clears every board and setting in this session. This cannot be undone.",
+    confirmUpdate: "Update now",
     shortcuts: "Keyboard shortcuts",
     shortcutsHelp: "View shortcuts for editing, effects, pages, and fullscreen.",
     version: "Version",
@@ -270,6 +281,7 @@ export function SettingsPanel({
   onApplyPwaUpdate,
 }: SettingsPanelProps) {
   const [confirmingReset, setConfirmingReset] = useState(false);
+  const [confirmingUpdate, setConfirmingUpdate] = useState(false);
   const copy = COPY[locale];
   const wakeText = wakeStatusText(wakeLockStatus, copy);
 
@@ -376,7 +388,7 @@ export function SettingsPanel({
             <button
               type="button"
               class="compact-button"
-              onClick={onApplyPwaUpdate}
+              onClick={() => setConfirmingUpdate(true)}
             >
               {copy.updateAction}
             </button>
@@ -445,6 +457,37 @@ export function SettingsPanel({
               }}
             >
               {copy.confirmReset}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {confirmingUpdate && onApplyPwaUpdate && (
+        <Modal
+          labelledBy="settings-update-title"
+          onClose={() => setConfirmingUpdate(false)}
+        >
+          <h2 class="modal-title" id="settings-update-title">
+            {copy.updateTitle}
+          </h2>
+          <p class="modal-description">{copy.updateDescription}</p>
+          <div class="button-row">
+            <button
+              type="button"
+              class="secondary-button"
+              onClick={() => setConfirmingUpdate(false)}
+            >
+              {copy.cancel}
+            </button>
+            <button
+              type="button"
+              class="primary-button"
+              onClick={() => {
+                setConfirmingUpdate(false);
+                onApplyPwaUpdate();
+              }}
+            >
+              {copy.confirmUpdate}
             </button>
           </div>
         </Modal>

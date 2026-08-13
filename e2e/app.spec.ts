@@ -328,6 +328,51 @@ test("marquee speed changes continuously without moving the current frame", asyn
   finalRates.forEach((rate) => expect(rate).toBeGreaterThan(5));
 });
 
+test("marquee speed preview keeps the board state untouched until release", async ({
+  page,
+}, testInfo) => {
+  skipUnlessProject(testInfo, CHROMIUM_REGULAR_PROJECT);
+  await dismissPwaBanner(page);
+  await editBoardText(page, "Imperative speed preview");
+  await page.getByRole("button", { name: /跑馬燈|Marquee/ }).click();
+  const dialog = page.locator("#tool-panel-marquee");
+  await dialog.getByRole("button", { name: /啟用跑馬燈|Enable marquee/ }).click();
+  const slider = dialog.getByRole("slider", { name: /速度|Speed/ });
+  await page.waitForFunction(() => {
+    const copies = [...document.querySelectorAll<HTMLElement>(".marquee-copy")];
+    return copies.length === 2 && copies.every((copy) => copy.getAnimations().length === 1);
+  });
+  await page.waitForTimeout(100);
+
+  await page.evaluate(() => {
+    (window as typeof window & { __boardMutationCount?: number }).__boardMutationCount = 0;
+    const board = document.querySelector("main.board");
+    if (!board) throw new Error("Board is unavailable");
+    const observer = new MutationObserver((records) => {
+      (window as typeof window & { __boardMutationCount?: number }).__boardMutationCount =
+        ((window as typeof window & { __boardMutationCount?: number }).__boardMutationCount ?? 0) + records.length;
+    });
+    observer.observe(board, { attributes: true, childList: true, subtree: true });
+    (window as typeof window & { __boardObserver?: MutationObserver }).__boardObserver = observer;
+  });
+
+  await slider.evaluate((element) => {
+    const input = element as HTMLInputElement;
+    input.value = "37.5";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await page.waitForTimeout(180);
+  expect(await page.evaluate(() =>
+    (window as typeof window & { __boardMutationCount?: number }).__boardMutationCount,
+  )).toBe(0);
+
+  await slider.dispatchEvent("pointerup");
+  await expect(slider).toHaveValue("37.5");
+  await page.evaluate(() => {
+    (window as typeof window & { __boardObserver?: MutationObserver }).__boardObserver?.disconnect();
+  });
+});
+
 test("marquee repeats seamlessly with two compositor copies and a half-screen gap", async ({
   page,
 }, testInfo) => {
@@ -409,6 +454,37 @@ test("marquee repeats seamlessly with two compositor copies and a half-screen ga
   expect(samples.reset[0].left).toBeCloseTo(samples.start[0].left, 0);
   expect(samples.reset[0].right).toBeCloseTo(samples.start[0].right, 0);
   expect(samples.viewportWidth - samples.reset[1].left).toBeLessThan(2);
+});
+
+test("marquee shares one synchronized flash timeline regardless of toggle order", async ({
+  page,
+}, testInfo) => {
+  skipUnlessProject(testInfo, CHROMIUM_REGULAR_PROJECT);
+  await dismissPwaBanner(page);
+  await editBoardText(page, "Synchronized flash");
+
+  await page.getByRole("button", { name: /更多工具|More tools/ }).click();
+  await page.getByRole("button", { name: /柔和閃爍|Gentle flash/ }).click();
+  await page.waitForTimeout(250);
+  await page.getByRole("button", { name: /關閉|Close/ }).click();
+  await page.getByRole("button", { name: /跑馬燈|Marquee/ }).click();
+  await page.locator("#tool-panel-marquee")
+    .getByRole("button", { name: /啟用跑馬燈|Enable marquee/ })
+    .click();
+
+  const flashTimelines = await page.locator(".moving-text").evaluate((moving) => ({
+    flashElements:
+      Number(moving.matches(".is-flashing")) +
+      moving.querySelectorAll(".is-flashing").length,
+    opacityAnimations: moving
+      .getAnimations({ subtree: true })
+      .filter((animation) => {
+        const effect = animation.effect;
+        return effect instanceof KeyframeEffect && effect.getKeyframes()
+          .some((frame) => frame.opacity !== undefined);
+      }).length,
+  }));
+  expect(flashTimelines).toEqual({ flashElements: 1, opacityAnimations: 1 });
 });
 
 test("marquee keeps two synchronized compositor layers in every direction", async ({
@@ -498,6 +574,33 @@ test("marquee keeps two synchronized compositor layers in every direction", asyn
     expect(metrics.hostWidth).toBeCloseTo(metrics.viewportWidth, 1);
     expect(metrics.hostHeight).toBeCloseTo(metrics.viewportHeight, 1);
   }
+});
+
+test("horizontal marquee keeps legal worst-case text within the layer budget", async ({
+  page,
+}, testInfo) => {
+  skipUnlessProject(testInfo, CHROMIUM_REGULAR_PROJECT);
+  await dismissPwaBanner(page);
+  const worstCase = "W".repeat(350);
+  await editBoardText(page, worstCase);
+  await page.getByRole("button", { name: /字型與字級|Font and size/ }).click();
+  await page.getByRole("slider", { name: /畫面填滿程度|Screen fill/ }).fill("100");
+  await page.getByRole("button", { name: /關閉|Close/ }).click();
+  await page.getByRole("button", { name: /跑馬燈|Marquee/ }).click();
+  await page.locator("#tool-panel-marquee")
+    .getByRole("button", { name: /啟用跑馬燈|Enable marquee/ })
+    .click();
+
+  await expect.poll(async () => page.locator(".marquee-copy").first().evaluate(
+    (copy) => copy.getBoundingClientRect().width,
+  )).toBeLessThanOrEqual(16_385);
+  const metrics = await page.locator(".moving-text").evaluate((moving) => ({
+    copyWidth: moving.querySelector<HTMLElement>(".marquee-copy")
+      ?.getBoundingClientRect().width ?? 0,
+    fontSize: Number.parseFloat(getComputedStyle(moving).fontSize),
+  }));
+  expect(metrics.copyWidth).toBeLessThanOrEqual(16_385);
+  expect(metrics.fontSize).toBeGreaterThanOrEqual(24);
 });
 
 test("responsive font fill grows beyond 200px and shrinks at the canvas boundary", async ({

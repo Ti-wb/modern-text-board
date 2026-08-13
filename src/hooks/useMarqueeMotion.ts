@@ -1,5 +1,10 @@
 import type { RefObject } from "preact";
-import { useCallback, useLayoutEffect, useRef } from "preact/hooks";
+import {
+  useCallback,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+} from "preact/hooks";
 
 import { LIMITS, clamp } from "../domain/defaults";
 import type { MarqueeDirection } from "../domain/types";
@@ -23,6 +28,11 @@ export interface MarqueeGeometry {
   baseDurationMs: number;
 }
 
+export interface MarqueeMotionController {
+  /** Preview a speed without rerendering the board or committing workspace state. */
+  previewSpeed: (speed: number) => void;
+}
+
 interface UseMarqueeMotionOptions {
   animationKey: string;
   direction: MarqueeDirection;
@@ -34,6 +44,7 @@ interface UseMarqueeMotionOptions {
   paused: boolean;
   speed: number;
   viewportRef: RefObject<HTMLElement>;
+  controllerRef?: RefObject<MarqueeMotionController>;
 }
 
 /**
@@ -155,6 +166,54 @@ function animationProgress(animation: Animation, durationMs: number): number | n
   return (((currentTime % durationMs) + durationMs) % durationMs) / durationMs;
 }
 
+/**
+ * Preserve the moving-axis screen coordinate when viewport geometry changes.
+ * A normalized timeline percentage alone is not stable because the start and
+ * travel distance both depend on the viewport size.
+ */
+export function remapMarqueeProgress(
+  progress: number,
+  previous: MarqueeGeometry,
+  next: MarqueeGeometry,
+): number {
+  const horizontal = previous.direction === "left" || previous.direction === "right";
+  const previousStart = horizontal ? previous.startX : previous.startY;
+  const previousEnd = horizontal ? previous.endX : previous.endY;
+  const nextStart = horizontal ? next.startX : next.startY;
+  const nextEnd = horizontal ? next.endX : next.endY;
+  const viewportExtent = previous.copyGap / MARQUEE_COPY_GAP_RATIO;
+  const contentExtent = previous.cycleDistance - previous.copyGap;
+  const phases = [progress, (progress + 0.5) % 1];
+  const visiblePixels = phases.map((phase) => {
+    const position = previousStart + (previousEnd - previousStart) * phase;
+    return Math.max(
+      0,
+      Math.min(viewportExtent, position + contentExtent) - Math.max(0, position),
+    );
+  });
+  // During half of the cycle the secondary copy is the visible one. Preserve
+  // whichever copy contributes the most pixels, then convert its remapped
+  // phase back to the primary timeline so resize cannot swap visible copies.
+  const copyIndex = visiblePixels[1] > visiblePixels[0] ? 1 : 0;
+  const visibleProgress = phases[copyIndex];
+  const previousPosition =
+    previousStart + (previousEnd - previousStart) * visibleProgress;
+  const nextDistance = nextEnd - nextStart;
+  if (Math.abs(nextDistance) < 0.0001) return 0;
+
+  const mappedVisibleProgress = (previousPosition - nextStart) / nextDistance;
+  const mappedPrimaryProgress = mappedVisibleProgress - copyIndex * 0.5;
+  return ((mappedPrimaryProgress % 1) + 1) % 1;
+}
+
+export function snapMarqueeCrossAxis(
+  value: number,
+  devicePixelRatio: number,
+): number {
+  const ratio = Math.max(1, Number.isFinite(devicePixelRatio) ? devicePixelRatio : 1);
+  return Math.round(value * ratio) / ratio;
+}
+
 function setGeometryProperties(
   element: HTMLElement,
   geometry: MarqueeGeometry,
@@ -192,6 +251,7 @@ export function useMarqueeMotion({
   paused,
   speed,
   viewportRef,
+  controllerRef,
 }: UseMarqueeMotionOptions): void {
   const animationsRef = useRef<Animation[]>([]);
   const geometryRef = useRef<MarqueeGeometry | null>(null);
@@ -201,6 +261,7 @@ export function useMarqueeMotion({
   const currentRateRef = useRef(1);
   const speedRef = useRef(speed);
   const pausedRef = useRef(paused);
+  const fallbackControllerRef = useRef<MarqueeMotionController>(null);
 
   useLayoutEffect(() => {
     speedRef.current = speed;
@@ -251,6 +312,58 @@ export function useMarqueeMotion({
     );
   }, [movingRef]);
 
+  const transitionToSpeed = useCallback((nextSpeed: number) => {
+    speedRef.current = nextSpeed;
+    const animations = animationsRef.current;
+    if (!enabled || animations.length === 0) {
+      applyFallbackSpeed();
+      return;
+    }
+
+    cancelRateTransition();
+    const startRate = currentRateRef.current;
+    const targetRate =
+      speedToPixelsPerSecond(nextSpeed) / MARQUEE_BASE_PIXELS_PER_SECOND;
+    if (Math.abs(targetRate - startRate) < 0.0001) return;
+
+    const startedAt = performance.now();
+    const update = (now: number) => {
+      if (
+        animationsRef.current.length !== animations.length ||
+        animationsRef.current.some(
+          (animation, index) => animation !== animations[index],
+        )
+      ) {
+        return;
+      }
+      const progress = Math.min(
+        1,
+        (now - startedAt) / MARQUEE_RATE_TRANSITION_MS,
+      );
+      const nextRate = interpolatePlaybackRate(
+        startRate,
+        targetRate,
+        progress,
+      );
+      animations.forEach((animation) =>
+        animation.updatePlaybackRate(nextRate),
+      );
+      currentRateRef.current = nextRate;
+      if (progress < 1) {
+        rateFrameRef.current = requestAnimationFrame(update);
+      } else {
+        rateFrameRef.current = null;
+      }
+    };
+    rateFrameRef.current = requestAnimationFrame(update);
+  }, [applyFallbackSpeed, cancelRateTransition, enabled]);
+
+  useImperativeHandle(
+    controllerRef ?? fallbackControllerRef,
+    () => ({ previewSpeed: transitionToSpeed }),
+    [transitionToSpeed],
+  );
+
   const rebuild = useCallback(() => {
     const viewport = viewportRef.current;
     const moving = movingRef.current;
@@ -275,6 +388,20 @@ export function useMarqueeMotion({
       contentRect.width,
       contentRect.height,
     );
+    const devicePixelRatio = window.devicePixelRatio || 1;
+    if (direction === "left" || direction === "right") {
+      nextGeometry.startY = snapMarqueeCrossAxis(
+        nextGeometry.startY,
+        devicePixelRatio,
+      );
+      nextGeometry.endY = nextGeometry.startY;
+    } else {
+      nextGeometry.startX = snapMarqueeCrossAxis(
+        nextGeometry.startX,
+        devicePixelRatio,
+      );
+      nextGeometry.endX = nextGeometry.startX;
+    }
     const nextGeometryKey = `${animationKey}:${direction}`;
     if (
       geometryRef.current &&
@@ -295,6 +422,14 @@ export function useMarqueeMotion({
             geometryRef.current.baseDurationMs,
           )
         : null;
+    const initialProgress =
+      previousProgress !== null && geometryRef.current
+        ? remapMarqueeProgress(
+            previousProgress,
+            geometryRef.current,
+            nextGeometry,
+          )
+        : 0;
     cancelAnimations();
     geometryRef.current = nextGeometry;
     geometryKeyRef.current = nextGeometryKey;
@@ -336,7 +471,7 @@ export function useMarqueeMotion({
       created.push(secondaryAnimation);
       animationsRef.current = created;
 
-      const primaryProgress = previousProgress ?? 0;
+      const primaryProgress = initialProgress;
       const secondaryProgress = (primaryProgress + 0.5) % 1;
       for (const [index, animation] of created.entries()) {
         animation.pause();
@@ -413,50 +548,9 @@ export function useMarqueeMotion({
   ]);
 
   useLayoutEffect(() => {
-    const animations = animationsRef.current;
-    if (!enabled || animations.length === 0) {
-      applyFallbackSpeed();
-      return;
-    }
-
-    cancelRateTransition();
-    const startRate = currentRateRef.current;
-    const targetRate =
-      speedToPixelsPerSecond(speed) / MARQUEE_BASE_PIXELS_PER_SECOND;
-    if (Math.abs(targetRate - startRate) < 0.0001) return;
-
-    const startedAt = performance.now();
-    const update = (now: number) => {
-      if (
-        animationsRef.current.length !== animations.length ||
-        animationsRef.current.some(
-          (animation, index) => animation !== animations[index],
-        )
-      ) {
-        return;
-      }
-      const progress = Math.min(
-        1,
-        (now - startedAt) / MARQUEE_RATE_TRANSITION_MS,
-      );
-      const nextRate = interpolatePlaybackRate(
-        startRate,
-        targetRate,
-        progress,
-      );
-      animations.forEach((animation) =>
-        animation.updatePlaybackRate(nextRate),
-      );
-      currentRateRef.current = nextRate;
-      if (progress < 1) {
-        rateFrameRef.current = requestAnimationFrame(update);
-      } else {
-        rateFrameRef.current = null;
-      }
-    };
-    rateFrameRef.current = requestAnimationFrame(update);
+    transitionToSpeed(speed);
     return cancelRateTransition;
-  }, [applyFallbackSpeed, cancelRateTransition, enabled, speed]);
+  }, [cancelRateTransition, speed, transitionToSpeed]);
 
   useLayoutEffect(() => {
     const animations = animationsRef.current;

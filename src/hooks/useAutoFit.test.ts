@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { LIMITS } from "../domain/defaults";
 import {
   findLargestFittingFontSize,
+  resolveMarqueeLayerWidthBudget,
   resolveEffectiveFontSize,
 } from "./useAutoFit";
 
@@ -40,6 +41,26 @@ describe("findLargestFittingFontSize", () => {
     });
     expect(LIMITS.maxAutoFitFontSizePx).toBe(4_096);
     expect(Math.max(...testedCandidates)).toBe(LIMITS.maxAutoFitFontSizePx);
+  });
+
+  it("supports the horizontal marquee layer-width budget boundary", () => {
+    const maximumWithinBudget = 84;
+
+    expect(
+      findLargestFittingFontSize(
+        (candidate) => candidate <= maximumWithinBudget,
+        LIMITS.minFontSizePx,
+      ),
+    ).toEqual({ maxFittingSize: maximumWithinBudget, overflow: false });
+    expect(LIMITS.maxMarqueeLayerWidthPx).toBe(16_384);
+  });
+});
+
+describe("resolveMarqueeLayerWidthBudget", () => {
+  it("reduces high-DPR compositor layers without penalizing DPR 1 and 2", () => {
+    expect(resolveMarqueeLayerWidthBudget(1)).toBe(16_384);
+    expect(resolveMarqueeLayerWidthBudget(2)).toBe(16_384);
+    expect(resolveMarqueeLayerWidthBudget(3)).toBe(10_922);
   });
 });
 

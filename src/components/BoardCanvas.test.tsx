@@ -14,13 +14,13 @@ function renderCanvas(overrides = {}) {
     onEdit: vi.fn(),
     onNext: vi.fn(),
     onPrevious: vi.fn(),
-    onInteraction: vi.fn(),
     onFitChange: vi.fn()
   };
 
   const view = render(
     <BoardCanvas
       editHint="Double-click to edit"
+      marqueeControllerRef={{ current: null }}
       page={page}
       paused={false}
       placeholder="Tap to enter text"
@@ -76,9 +76,9 @@ describe("BoardCanvas", () => {
     render(
       <BoardCanvas
         editHint="Double-click to edit"
+        marqueeControllerRef={{ current: null }}
         onEdit={vi.fn()}
         onFitChange={vi.fn()}
-        onInteraction={vi.fn()}
         onNext={vi.fn()}
         onPrevious={vi.fn()}
         page={page}
@@ -95,7 +95,7 @@ describe("BoardCanvas", () => {
     expect(screen.getByRole("main").classList.contains("is-presenting")).toBe(true);
   });
 
-  it("keeps flash, mirror, and marquee effects on separate wrappers", () => {
+  it("shares one flash timeline while keeping mirror and marquee transforms separate", () => {
     renderCanvas({
       theme: "dark",
       mirrored: true,
@@ -108,7 +108,8 @@ describe("BoardCanvas", () => {
       .find((element) => element.classList.contains("display-text"));
     expect(displayed).toBeDefined();
     expect(displayed!.closest(".is-mirrored")).not.toBeNull();
-    expect(displayed!.closest(".is-flashing")).not.toBeNull();
+    expect(displayed!.closest(".moving-text")?.classList.contains("is-flashing")).toBe(true);
+    expect(document.querySelectorAll(".is-flashing")).toHaveLength(1);
     expect(displayed!.closest(".is-marquee")).not.toBeNull();
     const copies = document.querySelectorAll(".marquee-copy");
     expect(copies).toHaveLength(2);
@@ -149,7 +150,7 @@ describe("BoardCanvas", () => {
     expect(verticalMeasure?.style.width).not.toBe("max-content");
   });
 
-  it("settles fitting after the follow-up layout measurement without looping", () => {
+  it("coalesces fitting into one layout frame without a follow-up loop", () => {
     const frames: FrameRequestCallback[] = [];
     const requestFrame = vi
       .spyOn(globalThis, "requestAnimationFrame")
@@ -168,11 +169,6 @@ describe("BoardCanvas", () => {
       initialFrames.forEach((callback) => callback(performance.now()));
     });
 
-    expect(frames).toHaveLength(1);
-    act(() => {
-      const followUpFrames = frames.splice(0);
-      followUpFrames.forEach((callback) => callback(performance.now()));
-    });
     expect(frames).toHaveLength(0);
     view.unmount();
     requestFrame.mockRestore();

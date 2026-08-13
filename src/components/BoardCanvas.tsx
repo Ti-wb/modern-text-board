@@ -1,7 +1,12 @@
+import type { RefObject } from "preact";
+import { memo } from "preact/compat";
 import { useEffect, useMemo, useRef } from "preact/hooks";
 import type { BoardPageV2 } from "../domain/types";
 import { useAutoFit } from "../hooks/useAutoFit";
-import { useMarqueeMotion } from "../hooks/useMarqueeMotion";
+import {
+  useMarqueeMotion,
+  type MarqueeMotionController,
+} from "../hooks/useMarqueeMotion";
 import { QrDisplay } from "./QrDisplay";
 
 interface BoardCanvasProps {
@@ -11,10 +16,10 @@ interface BoardCanvasProps {
   qrError: string;
   paused: boolean;
   presentation: boolean;
+  marqueeControllerRef: RefObject<MarqueeMotionController>;
   onEdit: () => void;
   onNext: () => void;
   onPrevious: () => void;
-  onInteraction: () => void;
   onFitChange: (
     size: number,
     overflow: boolean,
@@ -30,17 +35,17 @@ const fontClasses: Record<BoardPageV2["fontFamily"], string> = {
   "system-mono": "font-system-mono"
 };
 
-export function BoardCanvas({
+function BoardCanvasView({
   page,
   placeholder,
   editHint,
   qrError,
   paused,
   presentation,
+  marqueeControllerRef,
   onEdit,
   onNext,
   onPrevious,
-  onInteraction,
   onFitChange
 }: BoardCanvasProps) {
   const textViewportRef = useRef<HTMLDivElement>(null);
@@ -84,6 +89,7 @@ export function BoardCanvas({
     paused,
     speed: page.marquee.speed,
     viewportRef: textViewportRef,
+    controllerRef: marqueeControllerRef,
   });
 
   const textColor = page.textColor === "auto" ? (page.theme === "dark" ? "#ffffff" : "#1a1a1e") : page.textColor;
@@ -107,7 +113,6 @@ export function BoardCanvas({
     const bounds = event.currentTarget instanceof Element ? event.currentTarget.getBoundingClientRect() : null;
     if (!bounds || event.clientX - bounds.left < 24 || bounds.right - event.clientX < 24) return;
     pointerStartRef.current = { x: event.clientX, y: event.clientY, at: performance.now() };
-    onInteraction();
   };
 
   const handlePointerUp = (event: PointerEvent) => {
@@ -159,7 +164,7 @@ export function BoardCanvas({
             {displayText}
           </span>
           <div
-            class={`moving-text ${page.marquee.enabled ? `is-marquee marquee-${horizontalMarquee ? "horizontal" : "vertical"}` : ""} ${paused ? "is-paused" : ""}`}
+            class={`moving-text ${page.marquee.enabled ? `is-marquee marquee-${horizontalMarquee ? "horizontal" : "vertical"}` : ""} ${page.flashEnabled ? "is-flashing" : ""} ${paused ? "is-paused" : ""}`}
             ref={movingRef}
             style={textStyle}
           >
@@ -176,12 +181,10 @@ export function BoardCanvas({
                     : undefined
                 }
               >
-                <div class={`${page.flashEnabled ? "is-flashing" : ""} ${paused ? "is-paused" : ""}`}>
-                  <div class={page.mirrored ? "is-mirrored" : ""}>
-                    <p class={`display-text ${fontClasses[page.fontFamily]} ${horizontalMarquee ? "no-wrap" : ""}`}>
-                      {displayText}
-                    </p>
-                  </div>
+                <div class={page.mirrored ? "is-mirrored" : ""}>
+                  <p class={`display-text ${fontClasses[page.fontFamily]} ${horizontalMarquee ? "no-wrap" : ""}`}>
+                    {displayText}
+                  </p>
                 </div>
               </div>
             ))}
@@ -192,3 +195,10 @@ export function BoardCanvas({
     </main>
   );
 }
+
+/**
+ * UI chrome, PWA notices, and idle timers update independently from the sign.
+ * Keeping the canvas memoized prevents those updates from touching live WAAPI
+ * animations or forcing text measurement on the critical rendering path.
+ */
+export const BoardCanvas = memo(BoardCanvasView);

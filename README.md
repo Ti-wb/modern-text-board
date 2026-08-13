@@ -9,7 +9,7 @@
 - 文字排版：黑／白背景、四種系統字型、5–100% 畫面填滿程度、四種粗細、左／中／右對齊；文字碰到可用邊界時會自動縮小。
 - 文字顏色：Basic、Neon、Pastel 色票、自訂 Hex 與自動對比；低對比時提示但不阻止套用。
 - 展示效果：四向跑馬燈、約 24–600+ px/s 無段調速、柔和閃爍、文字鏡像，以及不清除設定的「暫停所有動態」。調速時會保留文字當下位置並平順加減速；重複文字預設相隔約半個畫面，前後兩段可同時出現並無縫接續。
-- 本機 QR Code：可顯示文字或網址，內容與白板文字分開保存，不會上傳至伺服器。
+- 本機 QR Code：可顯示文字或網址，內容可獨立於白板文字編輯，不會上傳至伺服器。
 - 多頁白板：新增、複製、改名、拖曳排序、上移、下移、刪除與前後切換，最多 50 頁。
 - 展示模式：先使用 CSS 展示模式，再漸進啟用瀏覽器 Fullscreen；可選擇在展示時保持螢幕常亮。
 - PWA：可安裝、離線啟動、由使用者確認更新；介面支援繁體中文與 English。
@@ -19,7 +19,7 @@
 ## 使用方式
 
 1. 在畫布空白處用滑鼠雙擊，或在觸控螢幕快速點兩下，即可編輯文字。
-2. 編輯器保留換行與空白；按「套用」保存，按「取消」放棄草稿。
+2. 編輯器保留換行與空白；按「套用」更新文字，按「取消」放棄草稿。
 3. 使用浮動工具列切換主題、字型、顏色、對齊、粗體與跑馬燈；拖曳左側把手可自由移動工具列。
 4. 在「更多」中設定鏡像、閃爍、QR Code、頁面、全螢幕展示與其他偏好。
 5. 畫布左右滑動可快速切頁；頁面面板與鍵盤操作是完整的替代操作方式。
@@ -68,8 +68,9 @@ npm run dev
 ```bash
 npm run test       # Vitest 單元與元件測試
 npm run test:e2e   # Playwright 瀏覽器測試
+npm run perf:smoke # 對已啟動的 production preview 跑 6x CPU／DPR 2 掉幀診斷
 npm run build      # TypeScript 檢查與 production build
-npm run check      # ESLint、Vitest 單元／元件測試與 build
+npm run check      # ESLint、Vitest、build 與初始 JS 150 KiB gzip 預算
 ```
 
 第一次執行 E2E 前，請先安裝 Playwright 瀏覽器：
@@ -100,7 +101,7 @@ npm run preview
 
 ## 資料、限制與瀏覽器能力
 
-- 每頁文字最多 2,000 個 Unicode code points；頁名最多 60 個；QR 內容最多 512 UTF-8 bytes。
+- 每頁文字最多 350 個 Unicode code points；頁名最多 60 個；QR 內容最多 512 UTF-8 bytes。
 - 至少保留一頁；內容不寫入 localStorage、IndexedDB 或任何遠端服務，重新載入後會重設。
 - Fullscreen 與 Screen Wake Lock 都是漸進增強。Fullscreen 被拒絕時仍保留 CSS 展示模式；Wake Lock 不支援、權限遭拒或頁面進入背景時，不影響其他功能。
 - Wake Lock 需要安全來源（HTTPS；localhost 僅供開發），並可能被作業系統省電策略釋放。頁面回到前景後會依偏好重新請求。

@@ -1,5 +1,5 @@
 import type { ComponentChildren } from "preact";
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { LIMITS, clamp } from "../domain/defaults";
 import { speedToPixelsPerSecond } from "../hooks/useMarqueeMotion";
 import type {
@@ -48,7 +48,8 @@ export interface MarqueePanelControls {
   speed: number;
   onEnabledChange: (enabled: boolean) => void;
   onDirectionChange: (direction: MarqueeDirection) => void;
-  onSpeedChange: (speed: number) => void;
+  onSpeedPreview: (speed: number) => void;
+  onSpeedCommit: (speed: number) => void;
 }
 
 export interface MorePanelControls {
@@ -86,7 +87,7 @@ const COPY = {
     fontSize: "畫面填滿程度",
     configured: "填滿",
     effective: "實際顯示",
-    overflow: "即使縮至 24 px 仍無法完整顯示，建議精簡文字。",
+    overflow: "即使縮至安全字級仍無法完整顯示，建議精簡文字。",
     fontWeight: "字重",
     sans: "系統黑體",
     rounded: "系統圓體",
@@ -127,12 +128,12 @@ const COPY = {
     flash: "柔和閃爍",
     flashHint: "約兩秒一次的透明度循環",
     qr: "QR Code",
-    qrHint: "內容與白板文字分開保存",
+    qrHint: "內容可獨立於白板文字編輯",
     pages: "頁面管理",
     pagesValue: (count: number) => `${count} 頁`,
     fullscreen: "全螢幕展示",
     fullscreenHint: "瀏覽器不支援時仍會進入展示模式",
-    settings: "設定與資料",
+    settings: "設定",
     settingsHint: "語言、常亮、離線與快捷鍵",
     on: "開啟",
     off: "關閉",
@@ -146,7 +147,7 @@ const COPY = {
     fontSize: "Screen fill",
     configured: "Fill",
     effective: "Displayed",
-    overflow: "The text still does not fit at 24 px. Try shortening it.",
+    overflow: "The text still does not fit at a safe size. Try shortening it.",
     fontWeight: "Weight",
     sans: "System sans",
     rounded: "System rounded",
@@ -187,12 +188,12 @@ const COPY = {
     flash: "Gentle flash",
     flashHint: "A soft opacity cycle about every two seconds",
     qr: "QR Code",
-    qrHint: "Saved separately from the board text",
+    qrHint: "Edited independently from the board text",
     pages: "Manage pages",
     pagesValue: (count: number) => `${count} ${count === 1 ? "page" : "pages"}`,
     fullscreen: "Full-screen presentation",
     fullscreenHint: "Presentation mode still works if browser fullscreen is unavailable",
-    settings: "Settings & data",
+    settings: "Settings",
     settingsHint: "Language, wake lock, offline use, and shortcuts",
     on: "On",
     off: "Off",
@@ -510,6 +511,39 @@ function AlignPanel({ controls, copy }: { controls: AlignPanelControls; copy: Co
 }
 
 function MarqueePanel({ controls, copy }: { controls: MarqueePanelControls; copy: Copy }) {
+  const [draftSpeed, setDraftSpeed] = useState(controls.speed);
+  const committedSpeedRef = useRef(controls.speed);
+  const previewCallbackRef = useRef(controls.onSpeedPreview);
+  useEffect(() => {
+    setDraftSpeed(controls.speed);
+    committedSpeedRef.current = controls.speed;
+  }, [controls.speed]);
+  useEffect(() => {
+    previewCallbackRef.current = controls.onSpeedPreview;
+  }, [controls.onSpeedPreview]);
+  useEffect(() => () => {
+    // Closing the panel while a pointer gesture is incomplete is a cancel,
+    // so return the compositor animation to the last committed setting.
+    previewCallbackRef.current(committedSpeedRef.current);
+  }, []);
+
+  const previewSpeed = (value: string) => {
+    const speed = Number(value);
+    setDraftSpeed(speed);
+    controls.onSpeedPreview(speed);
+  };
+  const commitSpeed = (value: string) => {
+    const speed = Number(value);
+    if (Math.abs(speed - committedSpeedRef.current) < 0.0001) return;
+    committedSpeedRef.current = speed;
+    controls.onSpeedCommit(speed);
+  };
+  const cancelSpeed = (input: HTMLInputElement) => {
+    const speed = committedSpeedRef.current;
+    input.value = String(speed);
+    setDraftSpeed(speed);
+    controls.onSpeedPreview(speed);
+  };
   const directions: Array<{ value: MarqueeDirection; label: string; icon: IconName }> = [
     { value: "left", label: copy.directionLeft, icon: "arrow-left" },
     { value: "right", label: copy.directionRight, icon: "arrow-right" },
@@ -551,23 +585,27 @@ function MarqueePanel({ controls, copy }: { controls: MarqueePanelControls; copy
       <div class="range-block" style="margin-top: 14px">
         <label class="range-label" for="marquee-speed-range">
           <span>{copy.speed}</span>
-          <output aria-hidden="true">{copy.speedValue(controls.speed)}</output>
+          <output aria-hidden="true">{copy.speedValue(draftSpeed)}</output>
         </label>
         <div class="range-with-icons">
           <Icon name="turtle" />
           <input
             aria-valuemax={LIMITS.maxMarqueeSpeed}
             aria-valuemin={LIMITS.minMarqueeSpeed}
-            aria-valuenow={controls.speed}
-            aria-valuetext={copy.speedAria(controls.speed)}
+            aria-valuenow={draftSpeed}
+            aria-valuetext={copy.speedAria(draftSpeed)}
             id="marquee-speed-range"
             max={LIMITS.maxMarqueeSpeed}
             min={LIMITS.minMarqueeSpeed}
-            onInput={(event) => controls.onSpeedChange(Number(event.currentTarget.value))}
+            onBlur={(event) => commitSpeed(event.currentTarget.value)}
+            onChange={(event) => commitSpeed(event.currentTarget.value)}
+            onInput={(event) => previewSpeed(event.currentTarget.value)}
+            onPointerCancel={(event) => cancelSpeed(event.currentTarget)}
+            onPointerUp={(event) => commitSpeed(event.currentTarget.value)}
             step={LIMITS.marqueeSpeedStep}
             style="min-height: 44px"
             type="range"
-            value={controls.speed}
+            value={draftSpeed}
           />
           <Icon name="rabbit" />
         </div>

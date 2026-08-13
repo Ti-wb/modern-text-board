@@ -8,13 +8,17 @@ import type {
 export const LIMITS = Object.freeze({
   maxPages: 50,
   maxPageNameCodePoints: 60,
-  maxTextCodePoints: 2_000,
+  maxTextCodePoints: 350,
   maxQrPayloadBytes: 512,
   minFontSizePx: 24,
   maxFontSizePx: 200,
   minFontScalePercent: 5,
   maxFontScalePercent: 100,
   maxAutoFitFontSizePx: 4096,
+  /** Prevent a single no-wrap compositor layer from growing without bound. */
+  maxMarqueeLayerWidthPx: 16_384,
+  /** Tighten the CSS-pixel cap on high-DPR displays with limited GPU memory. */
+  maxMarqueeLayerDeviceWidthPx: 32_768,
   minMarqueeSpeed: 1,
   maxMarqueeSpeed: 40,
   marqueeSpeedStep: 0.1,

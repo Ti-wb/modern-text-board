@@ -7,6 +7,8 @@ import {
   calculateMarqueeGeometry,
   interpolatePlaybackRate,
   MARQUEE_COPY_GAP_RATIO,
+  remapMarqueeProgress,
+  snapMarqueeCrossAxis,
   speedToPixelsPerSecond,
   useMarqueeMotion,
 } from "./useMarqueeMotion";
@@ -136,6 +138,43 @@ describe("marquee motion math", () => {
     expect(interpolatePlaybackRate(1, 5, 0)).toBe(1);
     expect(interpolatePlaybackRate(1, 5, 0.5)).toBeGreaterThan(3);
     expect(interpolatePlaybackRate(1, 5, 1)).toBe(5);
+  });
+
+  it("preserves the moving-axis screen coordinate across viewport resize", () => {
+    const previous = calculateMarqueeGeometry("left", 952, 600, 220, 80);
+    const next = calculateMarqueeGeometry("left", 568, 600, 220, 80);
+    const previousProgress = 0.4;
+    const remapped = remapMarqueeProgress(previousProgress, previous, next);
+    const oldX = previous.startX +
+      (previous.endX - previous.startX) * previousProgress;
+    const newX = next.startX + (next.endX - next.startX) * remapped;
+
+    expect(newX).toBeCloseTo(oldX, 5);
+  });
+
+  it("preserves the secondary copy when it is the visible copy during resize", () => {
+    const previous = calculateMarqueeGeometry("left", 952, 600, 220, 80);
+    const next = calculateMarqueeGeometry("left", 568, 600, 220, 80);
+    const primaryProgress = 0.9;
+    const previousSecondaryProgress = (primaryProgress + 0.5) % 1;
+    const remappedPrimary = remapMarqueeProgress(
+      primaryProgress,
+      previous,
+      next,
+    );
+    const remappedSecondary = (remappedPrimary + 0.5) % 1;
+    const oldX = previous.startX +
+      (previous.endX - previous.startX) * previousSecondaryProgress;
+    const newX = next.startX +
+      (next.endX - next.startX) * remappedSecondary;
+
+    expect(oldX).toBeGreaterThan(0);
+    expect(newX).toBeCloseTo(oldX, 5);
+  });
+
+  it("snaps only the static cross axis to physical pixels", () => {
+    expect(snapMarqueeCrossAxis(123.4, 2)).toBe(123.5);
+    expect(snapMarqueeCrossAxis(123.4, 3)).toBeCloseTo(123.333, 3);
   });
 });
 

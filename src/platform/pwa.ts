@@ -18,10 +18,6 @@ export type PwaInstallPhase =
 
 export type PwaInstallOutcome = "accepted" | "dismissed" | "unavailable";
 
-export interface UsePwaStatusOptions {
-  beforeApplyUpdate?: () => Promise<void> | void;
-}
-
 export interface PwaStatusState {
   phase: PwaPhase;
   supported: boolean;
@@ -62,10 +58,7 @@ function detectServiceWorkerControl(): boolean {
     navigator.serviceWorker.controller !== null;
 }
 
-export function usePwaStatus(
-  options: UsePwaStatusOptions = {},
-): PwaStatusState {
-  const { beforeApplyUpdate } = options;
+export function usePwaStatus(): PwaStatusState {
   const supported = typeof navigator !== "undefined" && "serviceWorker" in navigator;
   const [registered, setRegistered] = useState(false);
   const [online, setOnline] = useState(
@@ -136,7 +129,6 @@ export function usePwaStatus(
     setUpdating(true);
 
     try {
-      await beforeApplyUpdate?.();
       // vite-plugin-pwa only activates the waiting worker here; this function is
       // called exclusively from an explicit user action in PwaStatus.
       await updateServiceWorker(true);
@@ -145,7 +137,7 @@ export function usePwaStatus(
       setErrorDismissed(false);
       setUpdating(false);
     }
-  }, [beforeApplyUpdate, updateAvailable, updateServiceWorker, updating]);
+  }, [updateAvailable, updateServiceWorker, updating]);
 
   const phase = useMemo<PwaPhase>(() => {
     if (error && !errorDismissed) return "registration-error";

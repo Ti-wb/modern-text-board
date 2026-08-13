@@ -220,6 +220,9 @@ html[data-presentation="true"] .page-indicator {
   width: 100%;
   max-width: 100%;
   height: 100%;
+  /* Font interpolation changes glyph bounds every frame and would make the
+     ResizeObserver rebuild both compositor animations repeatedly. */
+  transition: none;
 }
 
 .marquee-copy {
@@ -228,7 +231,9 @@ html[data-presentation="true"] .page-indicator {
   left: 0;
   width: max-content;
   max-width: none;
-  contain: layout paint style;
+  /* The viewport owns clipping. Paint containment here can cut off accents,
+     combining marks, and glyph ink that extends beyond the layout box. */
+  contain: layout style;
   will-change: transform;
 }
 
@@ -358,7 +363,6 @@ html[data-presentation="true"] .page-indicator {
   opacity: 1;
   transform: translate(-50%, -50%);
   transition: opacity 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  will-change: opacity;
 }
 
 .page-indicator {
@@ -553,7 +557,9 @@ html[data-presentation="true"] .page-indicator {
 .app-shell.has-active-marquee .page-indicator,
 .app-shell.has-active-marquee .presentation-exit,
 .app-shell.has-active-marquee .toolbar,
-.app-shell.has-active-marquee .tool-panel {
+.app-shell.has-active-marquee .tool-panel,
+.app-shell.has-active-marquee .modal-backdrop,
+.app-shell.has-active-marquee .pwa-status {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }

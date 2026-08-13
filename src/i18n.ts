@@ -241,11 +241,11 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
 };
 
 export function resolveLocale(
-  savedLocale?: unknown,
+  preferredLocale?: unknown,
   browserLocales: readonly string[] =
     typeof navigator === "undefined" ? [] : navigator.languages,
 ): Locale {
-  if (savedLocale === "zh-TW" || savedLocale === "en") return savedLocale;
+  if (preferredLocale === "zh-TW" || preferredLocale === "en") return preferredLocale;
 
   for (const candidate of browserLocales) {
     const normalized = candidate.toLowerCase();

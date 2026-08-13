@@ -21,7 +21,8 @@ function renderPanel(
   onClose: () => void,
   kind: ToolPanelsProps["kind"] = "align",
   onFontScaleChange = vi.fn(),
-  onMarqueeSpeedChange = vi.fn(),
+  onMarqueeSpeedPreview = vi.fn(),
+  onMarqueeSpeedCommit = vi.fn(),
 ) {
   const noop = () => undefined;
   const props: ToolPanelsProps = {
@@ -61,7 +62,8 @@ function renderPanel(
       speed: 5,
       onEnabledChange: noop,
       onDirectionChange: noop,
-      onSpeedChange: onMarqueeSpeedChange,
+      onSpeedPreview: onMarqueeSpeedPreview,
+      onSpeedCommit: onMarqueeSpeedCommit,
     },
     more: {
       mirrored: false,
@@ -109,8 +111,15 @@ describe("ToolPanels keyboard dismissal", () => {
   });
 
   it("offers a high-range continuous marquee speed with accessible units", () => {
-    const onMarqueeSpeedChange = vi.fn();
-    renderPanel(vi.fn(), "marquee", vi.fn(), onMarqueeSpeedChange);
+    const onMarqueeSpeedPreview = vi.fn();
+    const onMarqueeSpeedCommit = vi.fn();
+    renderPanel(
+      vi.fn(),
+      "marquee",
+      vi.fn(),
+      onMarqueeSpeedPreview,
+      onMarqueeSpeedCommit,
+    );
 
     const slider = screen.getByRole("slider", { name: "Speed" });
     expect(slider.getAttribute("min")).toBe("1");
@@ -120,6 +129,29 @@ describe("ToolPanels keyboard dismissal", () => {
     expect(screen.getByText("84 px/s")).toBeTruthy();
 
     fireEvent.input(slider, { target: { value: "37.5" } });
-    expect(onMarqueeSpeedChange).toHaveBeenCalledWith(37.5);
+    expect(onMarqueeSpeedPreview).toHaveBeenCalledWith(37.5);
+    expect(onMarqueeSpeedCommit).not.toHaveBeenCalled();
+    fireEvent.pointerUp(slider, { target: { value: "37.5" } });
+    expect(onMarqueeSpeedCommit).toHaveBeenCalledOnce();
+    expect(onMarqueeSpeedCommit).toHaveBeenCalledWith(37.5);
+  });
+
+  it("rolls an incomplete marquee speed preview back when the panel closes", () => {
+    const onMarqueeSpeedPreview = vi.fn();
+    const onMarqueeSpeedCommit = vi.fn();
+    const view = renderPanel(
+      vi.fn(),
+      "marquee",
+      vi.fn(),
+      onMarqueeSpeedPreview,
+      onMarqueeSpeedCommit,
+    );
+
+    const slider = screen.getByRole("slider", { name: "Speed" });
+    fireEvent.input(slider, { target: { value: "37.5" } });
+    view.unmount();
+
+    expect(onMarqueeSpeedCommit).not.toHaveBeenCalled();
+    expect(onMarqueeSpeedPreview).toHaveBeenLastCalledWith(5);
   });
 });

@@ -1,15 +1,11 @@
-import {
-  usePwaStatus,
-  type PwaStatusState,
-  type UsePwaStatusOptions,
-} from "../platform/pwa";
+import type { PwaStatusState } from "../platform/pwa";
 
 export type PwaStatusLocale = "zh-TW" | "en";
 
-export interface PwaStatusProps extends UsePwaStatusOptions {
+export interface PwaStatusProps {
   locale: PwaStatusLocale;
   className?: string;
-  status?: PwaStatusState;
+  status: PwaStatusState;
 }
 
 interface PwaStatusViewProps {
@@ -21,8 +17,8 @@ interface PwaStatusViewProps {
 const COPY = {
   "zh-TW": {
     offlineReady: "已可離線使用",
-    offline: "目前離線，變更仍會保存在這台裝置",
-    updateAvailable: "有新版本可用",
+    offline: "目前離線，仍可繼續使用本次內容",
+    updateAvailable: "有新版本可用；更新會重設本次內容",
     updating: "正在更新…",
     registrationError: "無法啟用離線功能",
     update: "更新並重新載入",
@@ -31,8 +27,8 @@ const COPY = {
   },
   en: {
     offlineReady: "Ready to use offline",
-    offline: "You are offline. Changes still stay on this device.",
-    updateAvailable: "A new version is available",
+    offline: "You are offline. This session remains usable.",
+    updateAvailable: "An update is available; reloading resets this session",
     updating: "Updating…",
     registrationError: "Offline support could not be enabled",
     update: "Update and reload",
@@ -101,30 +97,10 @@ function PwaStatusView({
   );
 }
 
-function ConnectedPwaStatus({
-  locale,
-  className,
-  beforeApplyUpdate,
-}: Omit<PwaStatusProps, "status">) {
-  const status = usePwaStatus({ beforeApplyUpdate });
-  return <PwaStatusView className={className} locale={locale} status={status} />;
-}
-
 export function PwaStatus({
   locale,
   className,
-  beforeApplyUpdate,
   status,
 }: PwaStatusProps) {
-  if (status) {
-    return <PwaStatusView className={className} locale={locale} status={status} />;
-  }
-
-  return (
-    <ConnectedPwaStatus
-      beforeApplyUpdate={beforeApplyUpdate}
-      className={className}
-      locale={locale}
-    />
-  );
+  return <PwaStatusView className={className} locale={locale} status={status} />;
 }

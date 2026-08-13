@@ -26,6 +26,8 @@ export function QrDisplay({ payload, errorLabel }: QrDisplayProps) {
     if (!wrapper || !canvas || !payload) return;
 
     let cancelled = false;
+    let renderFrame: number | null = null;
+    let lastRenderKey = "";
     const render = async () => {
       try {
         const computed = window.getComputedStyle(wrapper);
@@ -39,10 +41,14 @@ export function QrDisplay({ payload, errorLabel }: QrDisplayProps) {
           MAX_QR_CSS_SIZE,
           Math.max(MIN_QR_CSS_SIZE, Math.floor(available || MIN_QR_CSS_SIZE))
         );
+        const devicePixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
+        const renderKey = `${payload}:${targetCssSize}:${devicePixelRatio}`;
+        if (renderKey === lastRenderKey) return;
+        lastRenderKey = renderKey;
+
         const moduleCount = QRCode.create(payload, {
           errorCorrectionLevel: "M"
         }).modules.size + QUIET_ZONE_MODULES;
-        const devicePixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
         // The bitmap always uses whole device pixels per QR module. CSS may
         // downsample that square slightly to keep a predictable 168–320px
         // board footprint without ever distorting its aspect ratio.
@@ -62,15 +68,27 @@ export function QrDisplay({ payload, errorLabel }: QrDisplayProps) {
         canvas.style.setProperty("height", `${targetCssSize}px`);
         setError(false);
       } catch {
-        if (!cancelled) setError(true);
+        if (!cancelled) {
+          lastRenderKey = "";
+          setError(true);
+        }
       }
     };
 
-    const observer = new ResizeObserver(render);
+    const scheduleRender = () => {
+      if (renderFrame !== null) return;
+      renderFrame = requestAnimationFrame(() => {
+        renderFrame = null;
+        void render();
+      });
+    };
+
+    const observer = new ResizeObserver(scheduleRender);
     observer.observe(wrapper);
-    void render();
+    scheduleRender();
     return () => {
       cancelled = true;
+      if (renderFrame !== null) cancelAnimationFrame(renderFrame);
       observer.disconnect();
     };
   }, [payload]);

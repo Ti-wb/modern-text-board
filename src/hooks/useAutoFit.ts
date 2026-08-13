@@ -1,5 +1,5 @@
 import type { RefObject } from "preact";
-import { useCallback, useLayoutEffect, useMemo, useState } from "preact/hooks";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { LIMITS, clamp } from "../domain/defaults";
 
 export type FitMode = "static" | "horizontal" | "vertical";
@@ -20,10 +20,28 @@ interface FitSearchResult {
   overflow: boolean;
 }
 
+interface FitState extends FitSearchResult {
+  minimumSize: number;
+}
+
+export function resolveMarqueeLayerWidthBudget(
+  devicePixelRatio: number,
+): number {
+  const ratio = clamp(
+    Number.isFinite(devicePixelRatio) ? devicePixelRatio : 1,
+    1,
+    3,
+  );
+  return Math.min(
+    LIMITS.maxMarqueeLayerWidthPx,
+    Math.floor(LIMITS.maxMarqueeLayerDeviceWidthPx / ratio),
+  );
+}
+
 export function findLargestFittingFontSize(
   fits: (candidate: number) => boolean,
-  minimum = LIMITS.minFontSizePx,
-  maximum = LIMITS.maxAutoFitFontSizePx,
+  minimum: number = LIMITS.minFontSizePx,
+  maximum: number = LIMITS.maxAutoFitFontSizePx,
 ): FitSearchResult {
   if (!fits(minimum)) {
     return { maxFittingSize: minimum, overflow: true };
@@ -64,12 +82,13 @@ export function resolveEffectiveFontSize(
   legacyMaxSize: number,
   scalePercent: number | null,
   fillReferenceSize: number,
+  minimumSize: number = LIMITS.minFontSizePx,
 ): number {
-  const fittingSize = Math.max(LIMITS.minFontSizePx, Math.floor(maxFittingSize));
+  const fittingSize = Math.max(minimumSize, Math.floor(maxFittingSize));
   if (scalePercent === null) {
     return clamp(
       Math.round(legacyMaxSize),
-      LIMITS.minFontSizePx,
+      minimumSize,
       fittingSize,
     );
   }
@@ -80,12 +99,12 @@ export function resolveEffectiveFontSize(
     LIMITS.maxFontScalePercent,
   );
   const responsiveTarget = Math.max(
-    LIMITS.minFontSizePx,
+    minimumSize,
     Math.floor((Math.max(1, fillReferenceSize) * percent) / 100),
   );
   return clamp(
     responsiveTarget,
-    LIMITS.minFontSizePx,
+    minimumSize,
     fittingSize,
   );
 }
@@ -100,14 +119,15 @@ export function useAutoFit({
   resizeKey = "",
   layoutKey = ""
 }: AutoFitOptions) {
-  const [fit, setFit] = useState<FitSearchResult>({
+  const [fit, setFit] = useState<FitState>({
     maxFittingSize: Math.max(LIMITS.minFontSizePx, maxSize),
     overflow: false,
+    minimumSize: LIMITS.minFontSizePx,
   });
   const [fillReferenceSize, setFillReferenceSize] = useState(
     Math.max(LIMITS.minFontSizePx, maxSize),
   );
-  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+  const recalculateFrameRef = useRef<number | null>(null);
 
   const recalculate = useCallback(() => {
     // These keys intentionally invalidate the measurement callback when text or
@@ -120,12 +140,9 @@ export function useAutoFit({
 
     const width = Math.max(1, container.clientWidth);
     const height = Math.max(1, container.clientHeight);
-    setContainerSize((current) =>
-      current.width === width && current.height === height
-        ? current
-        : { width, height },
+    const marqueeLayerWidthBudget = resolveMarqueeLayerWidthBudget(
+      window.devicePixelRatio || 1,
     );
-
     const fits = (candidate: number) => {
       const constrainWidth = mode !== "horizontal";
       measure.style.fontSize = `${candidate}px`;
@@ -135,49 +152,70 @@ export function useAutoFit({
       const rect = measure.getBoundingClientRect();
       const fitsWidth = rect.width <= width + 1 && measure.scrollWidth <= width + 1;
       const fitsHeight = rect.height <= height + 1 && measure.scrollHeight <= height + 1;
-      if (mode === "horizontal") return fitsHeight;
+      if (mode === "horizontal") {
+        const layerWidth = Math.max(rect.width, measure.scrollWidth);
+        return fitsHeight && layerWidth <= marqueeLayerWidthBudget;
+      }
       if (mode === "vertical") return fitsWidth;
       return fitsWidth && fitsHeight;
     };
 
-    const next = findLargestFittingFontSize(fits);
+    let minimumSize: number = LIMITS.minFontSizePx;
+    let next = findLargestFittingFontSize(
+      fits,
+      minimumSize,
+      LIMITS.maxAutoFitFontSizePx,
+    );
+    // Normal content never drops below the readable 24px floor. Only an
+    // exceptional no-wrap string that would exceed the compositor layer
+    // budget at 24px gets a second pass down to 12px.
+    const exceedsLayerBudgetAtReadableMinimum =
+      mode === "horizontal" &&
+      Math.max(measure.getBoundingClientRect().width, measure.scrollWidth) >
+        marqueeLayerWidthBudget;
+    if (next.overflow && exceedsLayerBudgetAtReadableMinimum) {
+      minimumSize = 12;
+      next = findLargestFittingFontSize(
+        fits,
+        minimumSize,
+        LIMITS.maxAutoFitFontSizePx,
+      );
+    }
+    const nextFit: FitState = { ...next, minimumSize };
     setFillReferenceSize((current) => (current === height ? current : height));
     setFit((current) =>
-      current.maxFittingSize === next.maxFittingSize &&
-      current.overflow === next.overflow
+      current.maxFittingSize === nextFit.maxFittingSize &&
+      current.overflow === nextFit.overflow &&
+      current.minimumSize === nextFit.minimumSize
         ? current
-        : next,
+        : nextFit,
     );
   }, [containerRef, measureRef, mode, content, layoutKey]);
 
-  useLayoutEffect(() => {
-    const frame = requestAnimationFrame(recalculate);
-    const resizeObserver = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      const nextWidth = Math.max(1, Math.round(entry?.contentRect.width ?? 0));
-      const nextHeight = Math.max(1, Math.round(entry?.contentRect.height ?? 0));
-      setContainerSize((current) =>
-        current.width === nextWidth && current.height === nextHeight
-          ? current
-          : { width: nextWidth, height: nextHeight },
-      );
+  const scheduleRecalculate = useCallback(() => {
+    if (recalculateFrameRef.current !== null) return;
+    recalculateFrameRef.current = requestAnimationFrame(() => {
+      recalculateFrameRef.current = null;
+      recalculate();
     });
-    if (containerRef.current) resizeObserver.observe(containerRef.current);
-    window.visualViewport?.addEventListener("resize", recalculate);
-    window.addEventListener("orientationchange", recalculate);
-    return () => {
-      cancelAnimationFrame(frame);
-      resizeObserver.disconnect();
-      window.visualViewport?.removeEventListener("resize", recalculate);
-      window.removeEventListener("orientationchange", recalculate);
-    };
-  }, [containerRef, recalculate, resizeKey]);
+  }, [recalculate]);
 
   useLayoutEffect(() => {
-    if (containerSize.width <= 0 || containerSize.height <= 0) return;
-    const frame = requestAnimationFrame(recalculate);
-    return () => cancelAnimationFrame(frame);
-  }, [containerSize, recalculate]);
+    scheduleRecalculate();
+    const resizeObserver = new ResizeObserver(scheduleRecalculate);
+    if (containerRef.current) resizeObserver.observe(containerRef.current);
+    window.visualViewport?.addEventListener("resize", scheduleRecalculate);
+    window.addEventListener("orientationchange", scheduleRecalculate);
+    return () => {
+      if (recalculateFrameRef.current !== null) {
+        cancelAnimationFrame(recalculateFrameRef.current);
+        recalculateFrameRef.current = null;
+      }
+      resizeObserver.disconnect();
+      window.visualViewport?.removeEventListener("resize", scheduleRecalculate);
+      window.removeEventListener("orientationchange", scheduleRecalculate);
+    };
+  }, [containerRef, resizeKey, scheduleRecalculate]);
 
   const fontSize = useMemo(
     () =>
@@ -186,8 +224,9 @@ export function useAutoFit({
         maxSize,
         scalePercent,
         fillReferenceSize,
+        fit.minimumSize,
       ),
-    [fillReferenceSize, fit.maxFittingSize, maxSize, scalePercent],
+    [fillReferenceSize, fit.maxFittingSize, fit.minimumSize, maxSize, scalePercent],
   );
 
   return {
