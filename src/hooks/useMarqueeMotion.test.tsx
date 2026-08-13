@@ -22,14 +22,16 @@ function MotionHarness({
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const movingRef = useRef<HTMLDivElement>(null);
-  const copyRef = useRef<HTMLDivElement>(null);
+  const primaryCopyRef = useRef<HTMLDivElement>(null);
+  const secondaryCopyRef = useRef<HTMLDivElement>(null);
   useMarqueeMotion({
     animationKey: "page-1",
     direction,
     enabled: true,
     fontSize: 80,
-    copyRef,
     movingRef,
+    primaryCopyRef,
+    secondaryCopyRef,
     paused,
     speed,
     viewportRef,
@@ -37,9 +39,8 @@ function MotionHarness({
   return (
     <div data-testid="viewport" ref={viewportRef}>
       <div data-testid="moving" ref={movingRef}>
-        <div>Message</div>
-        <div ref={copyRef}>Message</div>
-        <div>Message</div>
+        <div ref={primaryCopyRef}>Message</div>
+        <div ref={secondaryCopyRef}>Message</div>
       </div>
     </div>
   );
@@ -50,31 +51,45 @@ describe("marquee motion math", () => {
     expect(speedToPixelsPerSecond(1)).toBe(24);
     expect(speedToPixelsPerSecond(10)).toBe(160);
     expect(speedToPixelsPerSecond(5)).toBeCloseTo(84.44, 2);
-    expect(speedToPixelsPerSecond(12.5)).toBeGreaterThan(speedToPixelsPerSecond(12.4));
+    expect(speedToPixelsPerSecond(12.5)).toBeGreaterThan(
+      speedToPixelsPerSecond(12.4),
+    );
     expect(speedToPixelsPerSecond(LIMITS.maxMarqueeSpeed)).toBeGreaterThan(600);
   });
 
   it.each([
-    ["left", 500, 0, -100, 0, 600, 400],
-    ["right", -500, 0, 100, 0, 600, 400],
-    ["up", 0, 350, 0, -50, 400, 300],
-    ["down", 0, -350, 0, 50, 400, 300],
+    ["left", 800, 250, -400, 250, 1200, 600, 400],
+    ["right", -200, 250, 1000, 250, 1200, 600, 400],
+    ["up", 300, 600, 300, -200, 800, 400, 300],
+    ["down", 300, -100, 300, 700, 800, 400, 300],
   ] as const)(
-    "calculates a seamless repeated %s track with a half-screen gap",
-    (direction, startX, startY, endX, endY, distance, copyGap) => {
-      expect(calculateMarqueeGeometry(direction, 800, 600, 200, 100)).toMatchObject({
+    "calculates two independently composited %s copies with a half-screen gap",
+    (
+      direction,
+      startX,
+      startY,
+      endX,
+      endY,
+      distance,
+      cycleDistance,
+      copyGap,
+    ) => {
+      expect(
+        calculateMarqueeGeometry(direction, 800, 600, 200, 100),
+      ).toMatchObject({
         startX,
         startY,
         endX,
         endY,
         distance,
+        cycleDistance,
         copyGap,
       });
     },
   );
 
   it.each(["left", "right", "up", "down"] as const)(
-    "keeps the visible %s copy in the same position across an iteration reset",
+    "keeps the visible %s pixels unchanged when either copy resets",
     (direction) => {
       const viewportWidth = 800;
       const viewportHeight = 600;
@@ -91,25 +106,29 @@ describe("marquee motion math", () => {
       const viewportAxis = horizontal ? viewportWidth : viewportHeight;
       const contentAxis = horizontal ? contentWidth : contentHeight;
       const gap = viewportAxis * MARQUEE_COPY_GAP_RATIO;
-      const cycle = contentAxis + gap;
-      const trackAxis = contentAxis * 3 + gap * 2;
-      const base = (viewportAxis - trackAxis) / 2;
-      const startTransform = horizontal ? geometry.startX : geometry.startY;
-      const endTransform = horizontal ? geometry.endX : geometry.endY;
-      const positionsAt = (transform: number) =>
-        [0, 1, 2].map((index) => base + transform + index * cycle);
-      const visibleAt = (transform: number) =>
-        positionsAt(transform).filter(
-          (position) => position < viewportAxis && position + contentAxis > 0,
+      const start = horizontal ? geometry.startX : geometry.startY;
+      const end = horizontal ? geometry.endX : geometry.endY;
+      const positionAt = (progress: number) =>
+        start + (end - start) * progress;
+      const positionsAt = (progress: number) =>
+        [progress % 1, (progress + 0.5) % 1]
+          .map(positionAt)
+          .sort((left, right) => left - right);
+      const visibleAt = (progress: number) =>
+        positionsAt(progress).filter(
+          (position) =>
+            position < viewportAxis && position + contentAxis > 0,
         );
 
       expect(geometry.copyGap).toBe(gap);
-      expect(geometry.distance).toBe(cycle);
-      expect(
-        positionsAt(startTransform)[1] -
-          (positionsAt(startTransform)[0] + contentAxis),
-      ).toBe(gap);
-      expect(visibleAt(endTransform)).toEqual(visibleAt(startTransform));
+      expect(geometry.cycleDistance).toBe(contentAxis + gap);
+      expect(geometry.distance).toBe(geometry.cycleDistance * 2);
+      expect(positionsAt(0.5)).toEqual(positionsAt(0));
+
+      const overlapProgress = gap / 2 / geometry.distance;
+      const overlapping = visibleAt(overlapProgress);
+      expect(overlapping).toHaveLength(2);
+      expect(overlapping[1] - (overlapping[0] + contentAxis)).toBe(gap);
     },
   );
 
@@ -136,23 +155,40 @@ describe("useMarqueeMotion", () => {
     vi.restoreAllMocks();
   });
 
-  it("changes speed on the same animation timeline and preserves its current time", () => {
-    const frames: FrameRequestCallback[] = [];
-    vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((callback) => {
-      frames.push(callback);
-      return frames.length;
+  it("keeps two animation identities and only one rate controller during rapid input", () => {
+    let nextFrameId = 1;
+    let maxPendingFrames = 0;
+    const frames = new Map<number, FrameRequestCallback>();
+    vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation(
+      (callback) => {
+        const id = nextFrameId++;
+        frames.set(id, callback);
+        maxPendingFrames = Math.max(maxPendingFrames, frames.size);
+        return id;
+      },
+    );
+    vi.spyOn(globalThis, "cancelAnimationFrame").mockImplementation((id) => {
+      frames.delete(id);
     });
-    vi.spyOn(globalThis, "cancelAnimationFrame").mockImplementation(() => undefined);
+    const flushFrames = (now: number) => {
+      const pending = [...frames.values()];
+      frames.clear();
+      pending.forEach((callback) => callback(now));
+    };
 
-    const animation = {
-      cancel: vi.fn(),
-      currentTime: 240,
-      pause: vi.fn(),
-      play: vi.fn(),
-      playbackRate: 1,
-      updatePlaybackRate: vi.fn(),
-    } as unknown as Animation;
-    const animate = vi.fn(() => animation);
+    const animations = [0, 1].map(
+      () =>
+        ({
+          cancel: vi.fn(),
+          currentTime: 0,
+          pause: vi.fn(),
+          play: vi.fn(),
+          playbackRate: 1,
+          updatePlaybackRate: vi.fn(),
+        }) as unknown as Animation,
+    );
+    let animationIndex = 0;
+    const animate = vi.fn(() => animations[animationIndex++]);
     Object.defineProperty(HTMLElement.prototype, "animate", {
       configurable: true,
       value: animate,
@@ -160,30 +196,47 @@ describe("useMarqueeMotion", () => {
     });
 
     const view = render(<MotionHarness speed={5} />);
-    act(() => {
-      frames.splice(0).forEach((callback) => callback(performance.now()));
+    act(() => flushFrames(performance.now()));
+    expect(animate).toHaveBeenCalledTimes(2);
+    expect(animations[0].currentTime).toBe(0);
+    expect(animations[1].currentTime).toBeGreaterThan(0);
+    animations.forEach((animation) => {
+      expect(animation.updatePlaybackRate).toHaveBeenCalledWith(
+        speedToPixelsPerSecond(5) / 100,
+      );
     });
-    expect(animate).toHaveBeenCalledOnce();
-    expect(animation.updatePlaybackRate).toHaveBeenCalledWith(
-      speedToPixelsPerSecond(5) / 100,
+
+    const initialTimes = animations.map((animation) => animation.currentTime);
+    act(() => {
+      for (let speedStep = 51; speedStep <= 400; speedStep += 1) {
+        view.rerender(<MotionHarness speed={speedStep / 10} />);
+      }
+    });
+    expect(animate).toHaveBeenCalledTimes(2);
+    animations.forEach((animation) =>
+      expect(animation.cancel).not.toHaveBeenCalled(),
+    );
+    expect(maxPendingFrames).toBeLessThanOrEqual(1);
+
+    act(() => flushFrames(performance.now() + 200));
+    animations.forEach((animation, index) => {
+      expect(animation.updatePlaybackRate).toHaveBeenLastCalledWith(
+        speedToPixelsPerSecond(40) / 100,
+      );
+      expect(animation.currentTime).toBe(initialTimes[index]);
+    });
+    expect(frames.size).toBe(0);
+
+    view.rerender(<MotionHarness paused speed={40} />);
+    animations.forEach((animation) =>
+      expect(animation.pause).toHaveBeenCalled(),
+    );
+    view.rerender(<MotionHarness speed={40} />);
+    animations.forEach((animation) =>
+      expect(animation.play).toHaveBeenCalled(),
     );
 
-    const currentTime = animation.currentTime;
-    view.rerender(<MotionHarness speed={37.5} />);
-    expect(animate).toHaveBeenCalledOnce();
-    expect(animation.cancel).not.toHaveBeenCalled();
-
-    act(() => {
-      frames.splice(0).forEach((callback) => callback(performance.now() + 200));
-    });
-    expect(animation.updatePlaybackRate).toHaveBeenLastCalledWith(
-      speedToPixelsPerSecond(37.5) / 100,
-    );
-    expect(animation.currentTime).toBe(currentTime);
-
-    view.rerender(<MotionHarness paused speed={37.5} />);
-    expect(animation.pause).toHaveBeenCalledOnce();
-    view.rerender(<MotionHarness speed={37.5} />);
-    expect(animation.play).toHaveBeenCalledOnce();
+    view.unmount();
+    expect(frames.size).toBe(0);
   });
 });

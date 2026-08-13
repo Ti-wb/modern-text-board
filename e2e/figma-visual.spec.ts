@@ -60,6 +60,37 @@ async function captureState(page: Page, snapshotName: string): Promise<void> {
   });
 }
 
+async function freezeMarqueeAt(page: Page, progress: number): Promise<void> {
+  await page.locator(".moving-text").evaluate((moving, frozenProgress) => {
+    const copies = [...moving.querySelectorAll<HTMLElement>(".marquee-copy")];
+    const animations = copies.map((copy) => copy.getAnimations()[0]);
+    const duration = Number(animations[0]?.effect?.getTiming().duration);
+    if (animations.some((animation) => !animation) || !Number.isFinite(duration)) {
+      throw new Error("Marquee animations are unavailable");
+    }
+    animations.forEach((animation, index) => {
+      animation.pause();
+      animation.currentTime =
+        duration * ((frozenProgress + index * 0.5) % 1);
+    });
+    copies.forEach((copy, index) => {
+      const frozenTransform = getComputedStyle(copy).transform;
+      animations[index].cancel();
+      copy.style.transform = frozenTransform;
+      copy.style.willChange = "auto";
+    });
+  }, progress);
+}
+
+async function clearFrozenMarquee(page: Page): Promise<void> {
+  await page.locator(".moving-text").evaluate((moving) => {
+    moving.querySelectorAll<HTMLElement>(".marquee-copy").forEach((copy) => {
+      copy.style.removeProperty("transform");
+      copy.style.removeProperty("will-change");
+    });
+  });
+}
+
 test.beforeEach(async ({ page }, testInfo) => {
   skipOutsideFigmaViewport(testInfo);
 
@@ -98,27 +129,30 @@ test("matches the five primary Figma-derived 1024x768 states", async ({ page }) 
   await page.getByRole("button", { name: /啟用跑馬燈|Enable marquee/ }).click();
   await expect(page.locator(".moving-text")).toHaveClass(/is-marquee/);
   await page.waitForFunction(
-    () => document.querySelector(".moving-text")?.getAnimations().length === 1,
+    () => {
+      const copies = [...document.querySelectorAll<HTMLElement>(".marquee-copy")];
+      return copies.length === 2 && copies.every((copy) => copy.getAnimations().length === 1);
+    },
   );
-  await page.locator(".moving-text").evaluate((moving) => {
-    const animation = moving.getAnimations()[0];
-    const duration = Number(animation?.effect?.getTiming().duration);
-    if (!animation || !Number.isFinite(duration)) throw new Error("Marquee animation is unavailable");
-    animation.pause();
-    animation.currentTime = duration * 0.5;
-    const frozenTransform = getComputedStyle(moving).transform;
-    animation.cancel();
-    moving.style.transform = frozenTransform;
-    moving.style.willChange = "auto";
-  });
+  await freezeMarqueeAt(page, 0.25);
   await captureState(page, "04-marquee-panel.png");
-  await page.locator(".moving-text").evaluate((moving) => {
-    moving.style.removeProperty("transform");
-    moving.style.removeProperty("will-change");
+  await clearFrozenMarquee(page);
+
+  const marqueeToggle = page.getByRole("button", {
+    name: /啟用跑馬燈|Enable marquee/,
   });
+  await marqueeToggle.click();
+  await marqueeToggle.click();
+  await page.waitForFunction(
+    () => {
+      const copies = [...document.querySelectorAll<HTMLElement>(".marquee-copy")];
+      return copies.length === 2 && copies.every((copy) => copy.getAnimations().length === 1);
+    },
+  );
 
   await page.getByRole("button", { name: /關閉|Close/ }).click();
   await page.getByRole("button", { name: /更多工具|More tools/ }).click();
   await expect(page.getByRole("dialog", { name: /更多工具|More tools/ })).toBeVisible();
+  await freezeMarqueeAt(page, 0.36);
   await captureState(page, "05-more-panel.png");
 });

@@ -15,7 +15,10 @@ export interface MarqueeGeometry {
   startY: number;
   endX: number;
   endY: number;
+  /** Distance travelled by one copy before its invisible reset. */
   distance: number;
+  /** Distance between equivalent points on the two repeated copies. */
+  cycleDistance: number;
   copyGap: number;
   baseDurationMs: number;
 }
@@ -25,8 +28,9 @@ interface UseMarqueeMotionOptions {
   direction: MarqueeDirection;
   enabled: boolean;
   fontSize: number;
-  copyRef: RefObject<HTMLElement>;
   movingRef: RefObject<HTMLElement>;
+  primaryCopyRef: RefObject<HTMLElement>;
+  secondaryCopyRef: RefObject<HTMLElement>;
   paused: boolean;
   speed: number;
   viewportRef: RefObject<HTMLElement>;
@@ -45,6 +49,12 @@ export function speedToPixelsPerSecond(speed: number): number {
   return 24 + ((normalizedSpeed - 1) / 9) * 136;
 }
 
+/**
+ * Each copy travels two repeat intervals and is phase-shifted by one interval.
+ * Its reset therefore happens fully outside the viewport while the other copy
+ * occupies the exact same visible position. Keeping copies on separate layers
+ * avoids promoting one extremely wide multi-copy track to the GPU.
+ */
 export function calculateMarqueeGeometry(
   direction: MarqueeDirection,
   viewportWidth: number,
@@ -58,32 +68,41 @@ export function calculateMarqueeGeometry(
   const movingHeight = Math.max(1, contentHeight);
   const horizontalGap = width * MARQUEE_COPY_GAP_RATIO;
   const verticalGap = height * MARQUEE_COPY_GAP_RATIO;
-  const horizontalEntry = (width + movingWidth) / 2;
-  const verticalEntry = (height + movingHeight) / 2;
-  let startX = 0;
-  let startY = 0;
-  let endX = 0;
-  let endY = 0;
-  let distance: number;
+  const horizontalCycle = movingWidth + horizontalGap;
+  const verticalCycle = movingHeight + verticalGap;
+  let startX: number;
+  let startY: number;
+  let endX: number;
+  let endY: number;
+  let cycleDistance: number;
 
   if (direction === "left") {
-    startX = horizontalEntry;
-    distance = movingWidth + horizontalGap;
-    endX = startX - distance;
+    startX = width;
+    startY = (height - movingHeight) / 2;
+    cycleDistance = horizontalCycle;
+    endX = startX - cycleDistance * 2;
+    endY = startY;
   } else if (direction === "right") {
-    startX = -horizontalEntry;
-    distance = movingWidth + horizontalGap;
-    endX = startX + distance;
+    startX = -movingWidth;
+    startY = (height - movingHeight) / 2;
+    cycleDistance = horizontalCycle;
+    endX = startX + cycleDistance * 2;
+    endY = startY;
   } else if (direction === "up") {
-    startY = verticalEntry;
-    distance = movingHeight + verticalGap;
-    endY = startY - distance;
+    startX = (width - movingWidth) / 2;
+    startY = height;
+    cycleDistance = verticalCycle;
+    endX = startX;
+    endY = startY - cycleDistance * 2;
   } else {
-    startY = -verticalEntry;
-    distance = movingHeight + verticalGap;
-    endY = startY + distance;
+    startX = (width - movingWidth) / 2;
+    startY = -movingHeight;
+    cycleDistance = verticalCycle;
+    endX = startX;
+    endY = startY + cycleDistance * 2;
   }
 
+  const distance = cycleDistance * 2;
   return {
     direction,
     startX,
@@ -91,8 +110,15 @@ export function calculateMarqueeGeometry(
     endX,
     endY,
     distance,
-    copyGap: direction === "left" || direction === "right" ? horizontalGap : verticalGap,
-    baseDurationMs: Math.max(1, (distance / MARQUEE_BASE_PIXELS_PER_SECOND) * 1000),
+    cycleDistance,
+    copyGap:
+      direction === "left" || direction === "right"
+        ? horizontalGap
+        : verticalGap,
+    baseDurationMs: Math.max(
+      1,
+      (distance / MARQUEE_BASE_PIXELS_PER_SECOND) * 1000,
+    ),
   };
 }
 
@@ -119,19 +145,29 @@ function sameGeometry(left: MarqueeGeometry, right: MarqueeGeometry): boolean {
 
 function animationProgress(animation: Animation, durationMs: number): number | null {
   const currentTime = animation.currentTime;
-  if (typeof currentTime !== "number" || !Number.isFinite(currentTime) || durationMs <= 0) {
+  if (
+    typeof currentTime !== "number" ||
+    !Number.isFinite(currentTime) ||
+    durationMs <= 0
+  ) {
     return null;
   }
   return (((currentTime % durationMs) + durationMs) % durationMs) / durationMs;
 }
 
-function setGeometryProperties(element: HTMLElement, geometry: MarqueeGeometry): void {
+function setGeometryProperties(
+  element: HTMLElement,
+  geometry: MarqueeGeometry,
+): void {
   element.style.setProperty("--marquee-start-x", `${geometry.startX}px`);
   element.style.setProperty("--marquee-start-y", `${geometry.startY}px`);
   element.style.setProperty("--marquee-end-x", `${geometry.endX}px`);
   element.style.setProperty("--marquee-end-y", `${geometry.endY}px`);
   element.style.setProperty("--marquee-copy-gap", `${geometry.copyGap}px`);
-  element.style.setProperty("--marquee-base-duration", `${geometry.baseDurationMs}ms`);
+  element.style.setProperty(
+    "--marquee-base-duration",
+    `${geometry.baseDurationMs}ms`,
+  );
 }
 
 function removeGeometryProperties(element: HTMLElement): void {
@@ -142,6 +178,7 @@ function removeGeometryProperties(element: HTMLElement): void {
   element.style.removeProperty("--marquee-copy-gap");
   element.style.removeProperty("--marquee-base-duration");
   element.style.removeProperty("--marquee-fallback-duration");
+  element.style.removeProperty("--marquee-fallback-half-delay");
 }
 
 export function useMarqueeMotion({
@@ -149,15 +186,17 @@ export function useMarqueeMotion({
   direction,
   enabled,
   fontSize,
-  copyRef,
   movingRef,
+  primaryCopyRef,
+  secondaryCopyRef,
   paused,
   speed,
   viewportRef,
 }: UseMarqueeMotionOptions): void {
-  const animationRef = useRef<Animation | null>(null);
+  const animationsRef = useRef<Animation[]>([]);
   const geometryRef = useRef<MarqueeGeometry | null>(null);
   const geometryKeyRef = useRef("");
+  const rebuildFrameRef = useRef<number | null>(null);
   const rateFrameRef = useRef<number | null>(null);
   const currentRateRef = useRef(1);
   const speedRef = useRef(speed);
@@ -171,6 +210,13 @@ export function useMarqueeMotion({
     pausedRef.current = paused;
   }, [paused]);
 
+  const cancelRebuild = useCallback(() => {
+    if (rebuildFrameRef.current !== null) {
+      cancelAnimationFrame(rebuildFrameRef.current);
+      rebuildFrameRef.current = null;
+    }
+  }, []);
+
   const cancelRateTransition = useCallback(() => {
     if (rateFrameRef.current !== null) {
       cancelAnimationFrame(rateFrameRef.current);
@@ -178,22 +224,50 @@ export function useMarqueeMotion({
     }
   }, []);
 
+  const cancelAnimations = useCallback(() => {
+    animationsRef.current.forEach((animation) => animation.cancel());
+    animationsRef.current = [];
+  }, []);
+
   const applyFallbackSpeed = useCallback(() => {
     const moving = movingRef.current;
     const geometry = geometryRef.current;
-    if (!moving || !geometry || !moving.classList.contains("uses-css-marquee")) return;
-    const durationSeconds = geometry.distance / speedToPixelsPerSecond(speedRef.current);
-    moving.style.setProperty("--marquee-fallback-duration", `${durationSeconds}s`);
+    if (
+      !moving ||
+      !geometry ||
+      !moving.classList.contains("uses-css-marquee")
+    ) {
+      return;
+    }
+    const durationSeconds =
+      geometry.distance / speedToPixelsPerSecond(speedRef.current);
+    moving.style.setProperty(
+      "--marquee-fallback-duration",
+      `${durationSeconds}s`,
+    );
+    moving.style.setProperty(
+      "--marquee-fallback-half-delay",
+      `${-durationSeconds / 2}s`,
+    );
   }, [movingRef]);
 
   const rebuild = useCallback(() => {
     const viewport = viewportRef.current;
     const moving = movingRef.current;
-    const copy = copyRef.current;
-    if (!viewport || !moving || !copy || !enabled) return;
+    const primaryCopy = primaryCopyRef.current;
+    const secondaryCopy = secondaryCopyRef.current;
+    if (
+      !viewport ||
+      !moving ||
+      !primaryCopy ||
+      !secondaryCopy ||
+      !enabled
+    ) {
+      return;
+    }
 
     const viewportRect = viewport.getBoundingClientRect();
-    const contentRect = copy.getBoundingClientRect();
+    const contentRect = primaryCopy.getBoundingClientRect();
     const nextGeometry = calculateMarqueeGeometry(
       direction,
       viewportRect.width,
@@ -211,64 +285,102 @@ export function useMarqueeMotion({
     }
 
     cancelRateTransition();
-    const previousAnimation = animationRef.current;
+    const previousAnimation = animationsRef.current[0] ?? null;
     const shouldPreserveProgress =
       previousAnimation !== null && geometryKeyRef.current === nextGeometryKey;
     const previousProgress =
       shouldPreserveProgress && geometryRef.current
-        ? animationProgress(previousAnimation, geometryRef.current.baseDurationMs)
+        ? animationProgress(
+            previousAnimation,
+            geometryRef.current.baseDurationMs,
+          )
         : null;
-    previousAnimation?.cancel();
-    animationRef.current = null;
+    cancelAnimations();
     geometryRef.current = nextGeometry;
     geometryKeyRef.current = nextGeometryKey;
     setGeometryProperties(moving, nextGeometry);
 
     const targetRate =
-      speedToPixelsPerSecond(speedRef.current) / MARQUEE_BASE_PIXELS_PER_SECOND;
+      speedToPixelsPerSecond(speedRef.current) /
+      MARQUEE_BASE_PIXELS_PER_SECOND;
     currentRateRef.current = targetRate;
 
-    if (typeof moving.animate !== "function") {
+    if (
+      typeof primaryCopy.animate !== "function" ||
+      typeof secondaryCopy.animate !== "function"
+    ) {
       moving.classList.add("uses-css-marquee");
       applyFallbackSpeed();
       return;
     }
 
     moving.classList.remove("uses-css-marquee");
+    const created: Animation[] = [];
     try {
-      const animation = moving.animate(
-        [
-          {
-            transform: `translate3d(${nextGeometry.startX}px, ${nextGeometry.startY}px, 0)`,
-          },
-          {
-            transform: `translate3d(${nextGeometry.endX}px, ${nextGeometry.endY}px, 0)`,
-          },
-        ],
+      const keyframes: Keyframe[] = [
         {
-          duration: nextGeometry.baseDurationMs,
-          easing: "linear",
-          iterations: Infinity,
+          transform: `translate3d(${nextGeometry.startX}px, ${nextGeometry.startY}px, 0)`,
         },
-      );
-      animationRef.current = animation;
-      if (previousProgress !== null) {
-        animation.currentTime = previousProgress * nextGeometry.baseDurationMs;
+        {
+          transform: `translate3d(${nextGeometry.endX}px, ${nextGeometry.endY}px, 0)`,
+        },
+      ];
+      const timing: KeyframeAnimationOptions = {
+        duration: nextGeometry.baseDurationMs,
+        easing: "linear",
+        iterations: Infinity,
+      };
+      const primaryAnimation = primaryCopy.animate(keyframes, timing);
+      created.push(primaryAnimation);
+      const secondaryAnimation = secondaryCopy.animate(keyframes, timing);
+      created.push(secondaryAnimation);
+      animationsRef.current = created;
+
+      const primaryProgress = previousProgress ?? 0;
+      const secondaryProgress = (primaryProgress + 0.5) % 1;
+      for (const [index, animation] of created.entries()) {
+        animation.pause();
+        animation.currentTime =
+          (index === 0 ? primaryProgress : secondaryProgress) *
+          nextGeometry.baseDurationMs;
+        animation.updatePlaybackRate(targetRate);
       }
-      animation.updatePlaybackRate(targetRate);
-      if (pausedRef.current) animation.pause();
+      if (!pausedRef.current) {
+        created.forEach((animation) => animation.play());
+      }
     } catch {
+      created.forEach((animation) => animation.cancel());
+      animationsRef.current = [];
       moving.classList.add("uses-css-marquee");
       applyFallbackSpeed();
     }
-  }, [animationKey, applyFallbackSpeed, cancelRateTransition, copyRef, direction, enabled, movingRef, viewportRef]);
+  }, [
+    animationKey,
+    applyFallbackSpeed,
+    cancelAnimations,
+    cancelRateTransition,
+    direction,
+    enabled,
+    movingRef,
+    primaryCopyRef,
+    secondaryCopyRef,
+    viewportRef,
+  ]);
+
+  const scheduleRebuild = useCallback(() => {
+    if (rebuildFrameRef.current !== null) return;
+    rebuildFrameRef.current = requestAnimationFrame(() => {
+      rebuildFrameRef.current = null;
+      rebuild();
+    });
+  }, [rebuild]);
 
   useLayoutEffect(() => {
     const moving = movingRef.current;
     if (!enabled) {
+      cancelRebuild();
       cancelRateTransition();
-      animationRef.current?.cancel();
-      animationRef.current = null;
+      cancelAnimations();
       geometryRef.current = null;
       geometryKeyRef.current = "";
       if (moving) {
@@ -278,20 +390,31 @@ export function useMarqueeMotion({
       return;
     }
 
-    const frame = requestAnimationFrame(rebuild);
-    const observer = new ResizeObserver(rebuild);
+    scheduleRebuild();
+    const observer = new ResizeObserver(scheduleRebuild);
     if (viewportRef.current) observer.observe(viewportRef.current);
-    if (moving) observer.observe(moving);
-    if (copyRef.current) observer.observe(copyRef.current);
+    if (primaryCopyRef.current) observer.observe(primaryCopyRef.current);
     return () => {
-      cancelAnimationFrame(frame);
+      cancelRebuild();
       observer.disconnect();
     };
-  }, [animationKey, cancelRateTransition, copyRef, direction, enabled, fontSize, movingRef, rebuild, viewportRef]);
+  }, [
+    animationKey,
+    cancelAnimations,
+    cancelRateTransition,
+    cancelRebuild,
+    direction,
+    enabled,
+    fontSize,
+    movingRef,
+    primaryCopyRef,
+    scheduleRebuild,
+    viewportRef,
+  ]);
 
   useLayoutEffect(() => {
-    const animation = animationRef.current;
-    if (!enabled || !animation) {
+    const animations = animationsRef.current;
+    if (!enabled || animations.length === 0) {
       applyFallbackSpeed();
       return;
     }
@@ -304,10 +427,26 @@ export function useMarqueeMotion({
 
     const startedAt = performance.now();
     const update = (now: number) => {
-      if (animationRef.current !== animation) return;
-      const progress = Math.min(1, (now - startedAt) / MARQUEE_RATE_TRANSITION_MS);
-      const nextRate = interpolatePlaybackRate(startRate, targetRate, progress);
-      animation.updatePlaybackRate(nextRate);
+      if (
+        animationsRef.current.length !== animations.length ||
+        animationsRef.current.some(
+          (animation, index) => animation !== animations[index],
+        )
+      ) {
+        return;
+      }
+      const progress = Math.min(
+        1,
+        (now - startedAt) / MARQUEE_RATE_TRANSITION_MS,
+      );
+      const nextRate = interpolatePlaybackRate(
+        startRate,
+        targetRate,
+        progress,
+      );
+      animations.forEach((animation) =>
+        animation.updatePlaybackRate(nextRate),
+      );
       currentRateRef.current = nextRate;
       if (progress < 1) {
         rateFrameRef.current = requestAnimationFrame(update);
@@ -320,17 +459,20 @@ export function useMarqueeMotion({
   }, [applyFallbackSpeed, cancelRateTransition, enabled, speed]);
 
   useLayoutEffect(() => {
-    const animation = animationRef.current;
-    if (!enabled || !animation) return;
-    if (paused) animation.pause();
-    else animation.play();
+    const animations = animationsRef.current;
+    if (!enabled || animations.length === 0) return;
+    animations.forEach((animation) => {
+      if (paused) animation.pause();
+      else animation.play();
+    });
   }, [enabled, paused]);
 
   useLayoutEffect(
     () => () => {
+      cancelRebuild();
       cancelRateTransition();
-      animationRef.current?.cancel();
+      cancelAnimations();
     },
-    [cancelRateTransition],
+    [cancelAnimations, cancelRateTransition, cancelRebuild],
   );
 }

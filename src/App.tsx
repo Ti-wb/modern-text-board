@@ -473,7 +473,8 @@ export function App() {
     preferences.toolbar.verticalOffsetRatio < 0.5 ? "top" : "bottom";
   const shellClass = [
     "app-shell",
-    pwaBannerVisible ? "has-pwa-banner" : null
+    pwaBannerVisible ? "has-pwa-banner" : null,
+    page.marquee.enabled && !paused ? "has-active-marquee" : null,
   ].filter(Boolean).join(" ");
 
   return (

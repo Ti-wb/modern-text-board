@@ -46,7 +46,8 @@ export function BoardCanvas({
   const textViewportRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   const movingRef = useRef<HTMLDivElement>(null);
-  const marqueeCopyRef = useRef<HTMLDivElement>(null);
+  const primaryMarqueeCopyRef = useRef<HTMLDivElement>(null);
+  const secondaryMarqueeCopyRef = useRef<HTMLDivElement>(null);
   const pointerStartRef = useRef<{ x: number; y: number; at: number } | null>(null);
   const lastTapRef = useRef<{ x: number; y: number; at: number } | null>(null);
   const displayText = page.text || placeholder;
@@ -77,8 +78,9 @@ export function BoardCanvas({
     direction: page.marquee.direction,
     enabled: page.marquee.enabled,
     fontSize,
-    copyRef: marqueeCopyRef,
     movingRef,
+    primaryCopyRef: primaryMarqueeCopyRef,
+    secondaryCopyRef: secondaryMarqueeCopyRef,
     paused,
     speed: page.marquee.speed,
     viewportRef: textViewportRef,
@@ -161,12 +163,18 @@ export function BoardCanvas({
             ref={movingRef}
             style={textStyle}
           >
-            {(page.marquee.enabled ? [0, 1, 2] : [1]).map((copyIndex) => (
+            {(page.marquee.enabled ? [0, 1] : [0]).map((copyIndex) => (
               <div
-                aria-hidden={page.marquee.enabled && copyIndex !== 1}
+                aria-hidden={page.marquee.enabled && copyIndex !== 0}
                 class={page.marquee.enabled ? "marquee-copy" : undefined}
                 key={copyIndex}
-                ref={page.marquee.enabled && copyIndex === 1 ? marqueeCopyRef : undefined}
+                ref={
+                  page.marquee.enabled
+                    ? copyIndex === 0
+                      ? primaryMarqueeCopyRef
+                      : secondaryMarqueeCopyRef
+                    : undefined
+                }
               >
                 <div class={`${page.flashEnabled ? "is-flashing" : ""} ${paused ? "is-paused" : ""}`}>
                   <div class={page.mirrored ? "is-mirrored" : ""}>

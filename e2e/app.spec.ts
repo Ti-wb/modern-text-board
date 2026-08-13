@@ -255,21 +255,34 @@ test("marquee speed changes continuously without moving the current frame", asyn
   await marqueeDialog
     .getByRole("button", { name: /啟用跑馬燈|Enable marquee/ })
     .click();
+  await expect(page.locator(".app-shell")).toHaveClass(/has-active-marquee/);
+  const activeSurfaceFilters = await page.evaluate(() => ({
+    panel: getComputedStyle(document.querySelector<HTMLElement>(".tool-panel")!).backdropFilter,
+    toolbar: getComputedStyle(document.querySelector<HTMLElement>(".toolbar")!).backdropFilter,
+  }));
+  expect(activeSurfaceFilters).toEqual({ panel: "none", toolbar: "none" });
 
   const slider = marqueeDialog.getByRole("slider", { name: /速度|Speed/ });
   await expect(slider).toHaveAttribute("max", "40");
   await expect(slider).toHaveAttribute("step", "0.1");
   await page.waitForFunction(
-    () => document.querySelector(".moving-text")?.getAnimations().length === 1,
+    () => {
+      const copies = [...document.querySelectorAll<HTMLElement>(".marquee-copy")];
+      return copies.length === 2 && copies.every((copy) => copy.getAnimations().length === 1);
+    },
   );
 
   const before = await page.locator(".moving-text").evaluate((moving) => {
-    const animation = moving.getAnimations()[0];
-    const duration = Number(animation.effect?.getTiming().duration);
-    if (!animation || !Number.isFinite(duration)) throw new Error("Marquee animation is unavailable");
-    animation.currentTime = duration * 0.4;
-    const matrix = new DOMMatrixReadOnly(getComputedStyle(moving).transform);
-    (window as typeof window & { __marqueeAnimation?: Animation }).__marqueeAnimation = animation;
+    const copies = [...moving.querySelectorAll<HTMLElement>(".marquee-copy")];
+    const animations = copies.map((copy) => copy.getAnimations()[0]);
+    const duration = Number(animations[0]?.effect?.getTiming().duration);
+    if (animations.some((animation) => !animation) || !Number.isFinite(duration)) {
+      throw new Error("Marquee animations are unavailable");
+    }
+    animations[0].currentTime = duration * 0.4;
+    animations[1].currentTime = duration * 0.9;
+    const matrix = new DOMMatrixReadOnly(getComputedStyle(copies[0]).transform);
+    (window as typeof window & { __marqueeAnimations?: Animation[] }).__marqueeAnimations = animations;
     return { duration, sampledAt: performance.now(), x: matrix.m41, y: matrix.m42 };
   });
 
@@ -277,14 +290,16 @@ test("marquee speed changes continuously without moving the current frame", asyn
   await expect(slider).toHaveValue("37.5");
 
   const immediatelyAfter = await page.locator(".moving-text").evaluate((moving) => {
-    const animation = moving.getAnimations()[0];
-    const remembered = (window as typeof window & { __marqueeAnimation?: Animation })
-      .__marqueeAnimation;
-    const matrix = new DOMMatrixReadOnly(getComputedStyle(moving).transform);
-    const duration = Number(animation.effect?.getTiming().duration);
+    const copies = [...moving.querySelectorAll<HTMLElement>(".marquee-copy")];
+    const animations = copies.map((copy) => copy.getAnimations()[0]);
+    const remembered = (window as typeof window & { __marqueeAnimations?: Animation[] })
+      .__marqueeAnimations;
+    const matrix = new DOMMatrixReadOnly(getComputedStyle(copies[0]).transform);
+    const duration = Number(animations[0]?.effect?.getTiming().duration);
     return {
       duration,
-      sameAnimation: animation === remembered,
+      animationCount: animations.length,
+      sameAnimations: animations.every((animation, index) => animation === remembered?.[index]),
       sampledAt: performance.now(),
       x: matrix.m41,
       y: matrix.m42,
@@ -297,19 +312,23 @@ test("marquee speed changes continuously without moving the current frame", asyn
     immediatelyAfter.x - before.x,
     immediatelyAfter.y - before.y,
   );
-  expect(immediatelyAfter.sameAnimation).toBe(true);
+  expect(immediatelyAfter.animationCount).toBe(2);
+  expect(immediatelyAfter.sameAnimations).toBe(true);
   expect(immediatelyAfter.duration).toBeCloseTo(before.duration, 5);
   expect(immediatelyAfter.x).toBeLessThanOrEqual(before.x + 2);
   expect(distanceMoved).toBeLessThanOrEqual(614 * elapsedSeconds + 8);
 
   await page.waitForTimeout(200);
-  const finalRate = await page.locator(".moving-text").evaluate((moving) =>
-    moving.getAnimations()[0]?.playbackRate,
+  const finalRates = await page.locator(".moving-text").evaluate((moving) =>
+    [...moving.querySelectorAll<HTMLElement>(".marquee-copy")].map(
+      (copy) => copy.getAnimations()[0]?.playbackRate,
+    ),
   );
-  expect(finalRate).toBeGreaterThan(5);
+  expect(finalRates).toHaveLength(2);
+  finalRates.forEach((rate) => expect(rate).toBeGreaterThan(5));
 });
 
-test("marquee repeats seamlessly with two copies and a half-screen gap", async ({
+test("marquee repeats seamlessly with two compositor copies and a half-screen gap", async ({
   page,
 }, testInfo) => {
   skipUnlessProject(testInfo, CHROMIUM_REGULAR_PROJECT);
@@ -321,28 +340,32 @@ test("marquee repeats seamlessly with two copies and a half-screen gap", async (
     .getByRole("button", { name: /啟用跑馬燈|Enable marquee/ })
     .click();
   await page.waitForFunction(
-    () => document.querySelector(".moving-text")?.getAnimations().length === 1,
+    () => {
+      const copies = [...document.querySelectorAll<HTMLElement>(".marquee-copy")];
+      return copies.length === 2 && copies.every((copy) => copy.getAnimations().length === 1);
+    },
   );
 
   const samples = await page.locator(".moving-text").evaluate((moving) => {
     const viewport = moving.closest<HTMLElement>(".text-viewport");
-    const animation = moving.getAnimations()[0];
-    const duration = Number(animation?.effect?.getTiming().duration);
-    if (!viewport || !animation || !Number.isFinite(duration)) {
+    const copies = [...moving.querySelectorAll<HTMLElement>(".marquee-copy")];
+    const animations = copies.map((copy) => copy.getAnimations()[0]);
+    const duration = Number(animations[0]?.effect?.getTiming().duration);
+    if (!viewport || animations.some((animation) => !animation) || !Number.isFinite(duration)) {
       throw new Error("Marquee geometry is unavailable");
     }
-    animation.pause();
-    const copies = [...moving.querySelectorAll<HTMLElement>(".marquee-copy")];
-    if (copies.length !== 3) throw new Error("Marquee copies are unavailable");
+    animations.forEach((animation) => animation.pause());
+    if (copies.length !== 2) throw new Error("Marquee copies are unavailable");
     const viewportRect = viewport.getBoundingClientRect();
-    const copyWidth = copies[1].getBoundingClientRect().width;
+    const copyWidth = copies[0].getBoundingClientRect().width;
     const copyGap = Number.parseFloat(
       getComputedStyle(moving).getPropertyValue("--marquee-copy-gap"),
     );
     const cycleDistance = copyWidth + copyGap;
 
     const sampleAt = (time: number) => {
-      animation.currentTime = time;
+      animations[0].currentTime = time;
+      animations[1].currentTime = time + duration / 2;
       return copies
         .map((copy) => {
           const rect = copy.getBoundingClientRect();
@@ -358,16 +381,20 @@ test("marquee repeats seamlessly with two copies and a half-screen gap", async (
     return {
       copyCount: copies.length,
       copyGap,
+      copyWillChange: copies.map((copy) => getComputedStyle(copy).willChange),
       gapRatio: copyGap / viewportRect.width,
+      hostWillChange: getComputedStyle(moving).willChange,
       viewportWidth: viewportRect.width,
       beforeReset: sampleAt(duration - 1),
-      overlap: sampleAt(duration * ((copyGap / 2) / cycleDistance)),
+      overlap: sampleAt(duration * ((copyGap / 2) / (cycleDistance * 2))),
       reset: sampleAt(duration + 1),
       start: sampleAt(0),
     };
   });
 
-  expect(samples.copyCount).toBe(3);
+  expect(samples.copyCount).toBe(2);
+  expect(samples.copyWillChange).toEqual(["transform", "transform"]);
+  expect(samples.hostWillChange).not.toBe("transform");
   expect(samples.gapRatio).toBeCloseTo(0.5, 2);
   expect(samples.start).toHaveLength(1);
   expect(samples.overlap).toHaveLength(2);
@@ -382,6 +409,95 @@ test("marquee repeats seamlessly with two copies and a half-screen gap", async (
   expect(samples.reset[0].left).toBeCloseTo(samples.start[0].left, 0);
   expect(samples.reset[0].right).toBeCloseTo(samples.start[0].right, 0);
   expect(samples.viewportWidth - samples.reset[1].left).toBeLessThan(2);
+});
+
+test("marquee keeps two synchronized compositor layers in every direction", async ({
+  page,
+}, testInfo) => {
+  skipUnlessProject(testInfo, CHROMIUM_REGULAR_PROJECT);
+  await dismissPwaBanner(page);
+  await editBoardText(page, "Four-direction motion");
+  await page.getByRole("button", { name: /跑馬燈|Marquee/ }).click();
+  const marqueeDialog = page.locator("#tool-panel-marquee");
+  await marqueeDialog
+    .getByRole("button", { name: /啟用跑馬燈|Enable marquee/ })
+    .click();
+
+  const directions = [
+    { axis: "x", buttonIndex: 0, sign: -1 },
+    { axis: "x", buttonIndex: 1, sign: 1 },
+    { axis: "y", buttonIndex: 2, sign: -1 },
+    { axis: "y", buttonIndex: 3, sign: 1 },
+  ] as const;
+
+  for (const direction of directions) {
+    await marqueeDialog.locator(".segmented button").nth(direction.buttonIndex).click();
+    await page.waitForFunction(
+      ({ axis, sign }) => {
+        const copies = [
+          ...document.querySelectorAll<HTMLElement>(".marquee-copy"),
+        ];
+        const animation = copies[0]?.getAnimations()[0];
+        const frames = animation?.effect instanceof KeyframeEffect
+          ? animation.effect.getKeyframes()
+          : [];
+        if (copies.length !== 2 || frames.length < 2) return false;
+        const start = new DOMMatrixReadOnly(String(frames[0].transform));
+        const end = new DOMMatrixReadOnly(String(frames.at(-1)?.transform));
+        const delta = axis === "x" ? end.m41 - start.m41 : end.m42 - start.m42;
+        return Math.sign(delta) === sign;
+      },
+      direction,
+    );
+
+    const metrics = await page.locator(".moving-text").evaluate(
+      (moving, { axis }) => {
+        const viewport = moving.closest<HTMLElement>(".text-viewport");
+        const copies = [
+          ...moving.querySelectorAll<HTMLElement>(".marquee-copy"),
+        ];
+        const animations = copies.map((copy) => copy.getAnimations()[0]);
+        const duration = Number(animations[0]?.effect?.getTiming().duration);
+        if (!viewport || animations.some((animation) => !animation) || !Number.isFinite(duration)) {
+          throw new Error("Marquee animations are unavailable");
+        }
+        const initialTimes = animations.map(
+          (animation) => Number(animation.currentTime) % duration,
+        );
+        const phaseDistance = Math.abs(initialTimes[1] - initialTimes[0]);
+        const phaseError = Math.abs(
+          Math.min(phaseDistance, duration - phaseDistance) - duration / 2,
+        );
+
+        animations.forEach((animation) => animation.pause());
+        animations[0].currentTime = 0;
+        const start = new DOMMatrixReadOnly(getComputedStyle(copies[0]).transform);
+        animations[0].currentTime = duration * 0.25;
+        const quarter = new DOMMatrixReadOnly(getComputedStyle(copies[0]).transform);
+        const hostRect = moving.getBoundingClientRect();
+        const viewportRect = viewport.getBoundingClientRect();
+
+        return {
+          axisDelta: axis === "x" ? quarter.m41 - start.m41 : quarter.m42 - start.m42,
+          copyCount: copies.length,
+          crossAxisDelta: axis === "x" ? quarter.m42 - start.m42 : quarter.m41 - start.m41,
+          hostHeight: hostRect.height,
+          hostWidth: hostRect.width,
+          phaseError,
+          viewportHeight: viewportRect.height,
+          viewportWidth: viewportRect.width,
+        };
+      },
+      direction,
+    );
+
+    expect(metrics.copyCount).toBe(2);
+    expect(Math.sign(metrics.axisDelta)).toBe(direction.sign);
+    expect(Math.abs(metrics.crossAxisDelta)).toBeLessThan(0.5);
+    expect(metrics.phaseError).toBeLessThan(0.5);
+    expect(metrics.hostWidth).toBeCloseTo(metrics.viewportWidth, 1);
+    expect(metrics.hostHeight).toBeCloseTo(metrics.viewportHeight, 1);
+  }
 });
 
 test("responsive font fill grows beyond 200px and shrinks at the canvas boundary", async ({

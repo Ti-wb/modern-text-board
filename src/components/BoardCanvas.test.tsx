@@ -110,6 +110,12 @@ describe("BoardCanvas", () => {
     expect(displayed!.closest(".is-mirrored")).not.toBeNull();
     expect(displayed!.closest(".is-flashing")).not.toBeNull();
     expect(displayed!.closest(".is-marquee")).not.toBeNull();
+    const copies = document.querySelectorAll(".marquee-copy");
+    expect(copies).toHaveLength(2);
+    expect(copies[0].getAttribute("aria-hidden")).toBe("false");
+    expect(copies[1].getAttribute("aria-hidden")).toBe("true");
+    expect(getComputedStyle(copies[0]).willChange).toBe("transform");
+    expect(getComputedStyle(displayed!.closest(".moving-text")!).willChange).not.toBe("transform");
     expect(screen.getByRole("main").classList.contains("board-dark")).toBe(true);
   });
 
