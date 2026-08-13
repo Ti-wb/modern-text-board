@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { LIMITS } from "../domain/defaults";
 import {
+  assessMarqueeLayerBudget,
   findLargestFittingFontSize,
   resolveMarqueeLayerWidthBudget,
   resolveEffectiveFontSize,
@@ -52,15 +53,120 @@ describe("findLargestFittingFontSize", () => {
         LIMITS.minFontSizePx,
       ),
     ).toEqual({ maxFittingSize: maximumWithinBudget, overflow: false });
-    expect(LIMITS.maxMarqueeLayerWidthPx).toBe(16_384);
+    expect(LIMITS.maxMarqueeLayerDeviceWidthPx).toBe(16_384);
+  });
+
+  it("allows the emergency marquee pass to descend to 8px", () => {
+    expect(
+      findLargestFittingFontSize(
+        () => false,
+        LIMITS.minMarqueeFontSizePx,
+      ),
+    ).toEqual({
+      maxFittingSize: 8,
+      overflow: true,
+    });
   });
 });
 
 describe("resolveMarqueeLayerWidthBudget", () => {
-  it("reduces high-DPR compositor layers without penalizing DPR 1 and 2", () => {
+  it("converts the physical-pixel width cap for DPR 1–3", () => {
     expect(resolveMarqueeLayerWidthBudget(1)).toBe(16_384);
-    expect(resolveMarqueeLayerWidthBudget(2)).toBe(16_384);
-    expect(resolveMarqueeLayerWidthBudget(3)).toBe(10_922);
+    expect(resolveMarqueeLayerWidthBudget(2)).toBe(8_192);
+    expect(resolveMarqueeLayerWidthBudget(3)).toBe(5_461);
+  });
+
+  it("falls back to DPR 1 for invalid values", () => {
+    expect(resolveMarqueeLayerWidthBudget(Number.NaN)).toBe(16_384);
+    expect(resolveMarqueeLayerWidthBudget(0)).toBe(16_384);
+  });
+});
+
+describe("assessMarqueeLayerBudget", () => {
+  it.each([1, 2, 3])(
+    "enforces exact physical width and area boundaries at DPR %s",
+    (devicePixelRatio) => {
+      const cssWidthAtLimit =
+        LIMITS.maxMarqueeLayerDeviceWidthPx / devicePixelRatio;
+      const physicalHeightWithinArea = Math.floor(
+        LIMITS.maxMarqueeLayerDeviceAreaPx /
+          LIMITS.maxMarqueeLayerDeviceWidthPx,
+      );
+      const cssHeightAtAreaLimit =
+        physicalHeightWithinArea / devicePixelRatio;
+      expect(
+        assessMarqueeLayerBudget(
+          cssWidthAtLimit,
+          cssHeightAtAreaLimit,
+          devicePixelRatio,
+        ).budgetExceeded,
+      ).toBe(false);
+      expect(
+        assessMarqueeLayerBudget(
+          cssWidthAtLimit + 1 / devicePixelRatio,
+          cssHeightAtAreaLimit,
+          devicePixelRatio,
+        ).widthExceeded,
+      ).toBe(true);
+      expect(
+        assessMarqueeLayerBudget(
+          cssWidthAtLimit,
+          cssHeightAtAreaLimit + 1 / devicePixelRatio,
+          devicePixelRatio,
+        ).areaExceeded,
+      ).toBe(true);
+    },
+  );
+
+  it("accepts a layer exactly on the physical-pixel area limit", () => {
+    expect(assessMarqueeLayerBudget(8_000, 250, 2)).toEqual({
+      metrics: {
+        cssWidthPx: 8_000,
+        cssHeightPx: 250,
+        deviceWidthPx: 16_000,
+        deviceHeightPx: 500,
+        deviceAreaPx: 8_000_000,
+      },
+      widthExceeded: false,
+      areaExceeded: false,
+      budgetExceeded: false,
+    });
+  });
+
+  it("enforces the physical width independently of CSS width", () => {
+    const result = assessMarqueeLayerBudget(8_192.1, 20, 2);
+
+    expect(result.metrics.deviceWidthPx).toBe(16_385);
+    expect(result.widthExceeded).toBe(true);
+    expect(result.budgetExceeded).toBe(true);
+  });
+
+  it("enforces the area budget for a tall vertical marquee", () => {
+    const result = assessMarqueeLayerBudget(500, 4_001, 2);
+
+    expect(result.metrics).toMatchObject({
+      deviceWidthPx: 1_000,
+      deviceHeightPx: 8_002,
+      deviceAreaPx: 8_002_000,
+    });
+    expect(result.widthExceeded).toBe(false);
+    expect(result.areaExceeded).toBe(true);
+    expect(result.budgetExceeded).toBe(true);
+  });
+
+  it("keeps a normal horizontal layer within both budgets", () => {
+    const result = assessMarqueeLayerBudget(4_000, 100, 2);
+
+    expect(result.metrics.deviceAreaPx).toBe(1_600_000);
+    expect(result.widthExceeded).toBe(false);
+    expect(result.areaExceeded).toBe(false);
+    expect(result.budgetExceeded).toBe(false);
+  });
+
+  it("fails closed when layout dimensions are invalid", () => {
+    expect(
+      assessMarqueeLayerBudget(Number.NaN, 100, 2).budgetExceeded,
+    ).toBe(true);
   });
 });
 

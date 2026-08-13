@@ -68,10 +68,15 @@ npm run dev
 ```bash
 npm run test       # Vitest 單元與元件測試
 npm run test:e2e   # Playwright 瀏覽器測試
-npm run perf:smoke # 對已啟動的 production preview 跑 6x CPU／DPR 2 掉幀診斷
+npm run perf:smoke # 對已啟動的 production preview 跑 compositor trace 診斷
+npm run perf:accept # 60 秒／情境的 DPR 1–3 production 強制驗收矩陣
 npm run build      # TypeScript 檢查與 production build
 npm run check      # ESLint、Vitest、build 與初始 JS 150 KiB gzip 預算
 ```
+
+`perf:smoke` 可用 `PERF_DPR=1|2|3`、`PERF_SCENARIO=short|large|max|whitespace|emoji`、`PERF_DIRECTION=left|right|up|down` 與 `PERF_FLASH=1` 組合測試。Headless Chromium 不會因 `PERF_REFRESH_HZ=120` 就模擬出 120Hz；120Hz／ProMotion 結論仍需在對應實機上驗收，工具會另外回報量測到的 cadence 是否符合期待值。
+
+Trace 會要求穩態 Layout 為 0，並拒絕持續 Paint。Chromium 對接近實體 layer 上限的離屏文字，可能在重新進場時做一次 backing-store refresh；工具只容許單一、50ms 內且單事件不超過 4ms 的 isolated burst，並仍同時要求掉幀率、連續遺失 refresh slot、動畫重建與調速 controller 全部通過，不會把逐幀 repaint 視為合格。
 
 第一次執行 E2E 前，請先安裝 Playwright 瀏覽器：
 

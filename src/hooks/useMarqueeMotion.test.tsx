@@ -5,9 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LIMITS } from "../domain/defaults";
 import {
   calculateMarqueeGeometry,
-  interpolatePlaybackRate,
+  followPlaybackRate,
+  MARQUEE_BASE_PIXELS_PER_SECOND,
   MARQUEE_COPY_GAP_RATIO,
   remapMarqueeProgress,
+  resolveAdaptiveMarqueeSpeed,
   snapMarqueeCrossAxis,
   speedToPixelsPerSecond,
   useMarqueeMotion,
@@ -15,11 +17,15 @@ import {
 
 function MotionHarness({
   direction = "left",
+  devicePixelRatio = 1,
   paused = false,
+  refreshRateHz = 60,
   speed,
 }: {
   direction?: "left" | "right" | "up" | "down";
+  devicePixelRatio?: number;
   paused?: boolean;
+  refreshRateHz?: number;
   speed: number;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -29,12 +35,14 @@ function MotionHarness({
   useMarqueeMotion({
     animationKey: "page-1",
     direction,
+    devicePixelRatio,
     enabled: true,
     fontSize: 80,
     movingRef,
     primaryCopyRef,
     secondaryCopyRef,
     paused,
+    refreshRateHz,
     speed,
     viewportRef,
   });
@@ -57,6 +65,55 @@ describe("marquee motion math", () => {
       speedToPixelsPerSecond(12.4),
     );
     expect(speedToPixelsPerSecond(LIMITS.maxMarqueeSpeed)).toBeGreaterThan(600);
+  });
+
+  it.each([
+    [59.94, 1, 479.52],
+    [60, 1, 480],
+    [90, 1, 607.5],
+    [120, 1, 600],
+    [144, 1, 612],
+    [60, 2, 480],
+    [120, 2, 600],
+    [120, 3, 610],
+  ])(
+    "adapts maximum speed to %sHz at DPR %s",
+    (refreshRateHz, devicePixelRatio, expectedSpeed) => {
+      const adaptive = resolveAdaptiveMarqueeSpeed(
+        speedToPixelsPerSecond(40),
+        refreshRateHz,
+        devicePixelRatio,
+      );
+      expect(adaptive.effectivePixelsPerSecond).toBeCloseTo(expectedSpeed, 4);
+      expect(adaptive.effectivePixelsPerSecond).toBeLessThanOrEqual(
+        speedToPixelsPerSecond(40),
+      );
+      expect(adaptive.cssPixelsPerFrame).toBeLessThanOrEqual(8);
+      expect(adaptive.devicePixelsPerFrame).toBeCloseTo(
+        adaptive.cssPixelsPerFrame * devicePixelRatio,
+        5,
+      );
+    },
+  );
+
+  it("rejects quarter-device-pixel alignment when it loses over three percent", () => {
+    const adaptive = resolveAdaptiveMarqueeSpeed(24, 60, 1);
+    expect(adaptive.effectivePixelsPerSecond).toBe(24);
+    expect(adaptive.devicePixelsPerFrame).toBeCloseTo(0.4, 5);
+  });
+
+  it("accepts pixel alignment at the three-percent boundary and rejects it above", () => {
+    const accepted = resolveAdaptiveMarqueeSpeed(1.0308 * 60, 60, 1);
+    const rejected = resolveAdaptiveMarqueeSpeed(1.031 * 60, 60, 1);
+    expect(accepted.devicePixelsPerFrame).toBe(1);
+    expect(rejected.devicePixelsPerFrame).toBeCloseTo(1.031, 5);
+  });
+
+  it("falls back safely for invalid cadence and DPR inputs", () => {
+    const adaptive = resolveAdaptiveMarqueeSpeed(700, Number.NaN, 0);
+    expect(adaptive.effectivePixelsPerSecond).toBe(480);
+    expect(adaptive.cssPixelsPerFrame).toBe(8);
+    expect(adaptive.devicePixelsPerFrame).toBe(8);
   });
 
   it.each([
@@ -134,10 +191,12 @@ describe("marquee motion math", () => {
     },
   );
 
-  it("eases playback-rate changes without overshooting", () => {
-    expect(interpolatePlaybackRate(1, 5, 0)).toBe(1);
-    expect(interpolatePlaybackRate(1, 5, 0.5)).toBeGreaterThan(3);
-    expect(interpolatePlaybackRate(1, 5, 1)).toBe(5);
+  it("follows a changing playback-rate target without overshooting", () => {
+    expect(followPlaybackRate(1, 5, 0)).toBe(1);
+    expect(followPlaybackRate(1, 5, 16.67)).toBeGreaterThan(1);
+    expect(followPlaybackRate(1, 5, 16.67)).toBeLessThan(5);
+    expect(followPlaybackRate(5, 1, 16.67)).toBeGreaterThan(1);
+    expect(followPlaybackRate(5, 1, 16.67)).toBeLessThan(5);
   });
 
   it("preserves the moving-axis screen coordinate across viewport resize", () => {
@@ -257,10 +316,21 @@ describe("useMarqueeMotion", () => {
     );
     expect(maxPendingFrames).toBeLessThanOrEqual(1);
 
-    act(() => flushFrames(performance.now() + 200));
+    act(() => {
+      let timestamp = performance.now();
+      for (let frame = 0; frame < 60 && frames.size > 0; frame += 1) {
+        timestamp += 1000 / 60;
+        flushFrames(timestamp);
+      }
+    });
+    const effectiveMaximumRate = resolveAdaptiveMarqueeSpeed(
+      speedToPixelsPerSecond(40),
+      60,
+      window.devicePixelRatio || 1,
+    ).effectivePixelsPerSecond / 100;
     animations.forEach((animation, index) => {
       expect(animation.updatePlaybackRate).toHaveBeenLastCalledWith(
-        speedToPixelsPerSecond(40) / 100,
+        effectiveMaximumRate,
       );
       expect(animation.currentTime).toBe(initialTimes[index]);
     });
@@ -277,5 +347,83 @@ describe("useMarqueeMotion", () => {
 
     view.unmount();
     expect(frames.size).toBe(0);
+  });
+
+  it("changes display cadence through playback rate without rebuilding or moving time", () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrameId = 1;
+    vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation(
+      (callback) => {
+        const id = nextFrameId++;
+        frames.set(id, callback);
+        return id;
+      },
+    );
+    vi.spyOn(globalThis, "cancelAnimationFrame").mockImplementation((id) => {
+      frames.delete(id);
+    });
+    const flushOneDisplayFrame = (now: number) => {
+      const pending = [...frames.values()];
+      frames.clear();
+      pending.forEach((callback) => callback(now));
+    };
+
+    const animations = [0, 1].map(
+      () =>
+        ({
+          cancel: vi.fn(),
+          currentTime: 1_234,
+          pause: vi.fn(),
+          play: vi.fn(),
+          playbackRate: 1,
+          updatePlaybackRate: vi.fn(),
+        }) as unknown as Animation,
+    );
+    let animationIndex = 0;
+    const animate = vi.fn(() => animations[animationIndex++]);
+    Object.defineProperty(HTMLElement.prototype, "animate", {
+      configurable: true,
+      value: animate,
+      writable: true,
+    });
+
+    const view = render(
+      <MotionHarness devicePixelRatio={2} refreshRateHz={60} speed={40} />,
+    );
+    let now = performance.now();
+    act(() => flushOneDisplayFrame(now));
+    expect(animate).toHaveBeenCalledTimes(2);
+    animations[0].currentTime = 1_234;
+    animations[1].currentTime = 5_678;
+    const timesBeforeCadenceChange = animations.map(
+      (animation) => animation.currentTime,
+    );
+
+    view.rerender(
+      <MotionHarness devicePixelRatio={2} refreshRateHz={120} speed={40} />,
+    );
+    expect(animate).toHaveBeenCalledTimes(2);
+    expect(animations.map((animation) => animation.currentTime)).toEqual(
+      timesBeforeCadenceChange,
+    );
+
+    act(() => {
+      for (let frame = 0; frame < 60 && frames.size > 0; frame += 1) {
+        now += 1000 / 120;
+        flushOneDisplayFrame(now);
+      }
+    });
+    const expectedRate = resolveAdaptiveMarqueeSpeed(
+      speedToPixelsPerSecond(40),
+      120,
+      2,
+    ).effectivePixelsPerSecond / MARQUEE_BASE_PIXELS_PER_SECOND;
+    animations.forEach((animation) => {
+      expect(animation.cancel).not.toHaveBeenCalled();
+      expect(animation.updatePlaybackRate).toHaveBeenLastCalledWith(
+        expectedRate,
+      );
+    });
+    view.unmount();
   });
 });

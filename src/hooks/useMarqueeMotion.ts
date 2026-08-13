@@ -4,15 +4,24 @@ import {
   useImperativeHandle,
   useLayoutEffect,
   useRef,
+  useState,
 } from "preact/hooks";
 
 import { LIMITS, clamp } from "../domain/defaults";
 import type { MarqueeDirection } from "../domain/types";
 
 export const MARQUEE_BASE_PIXELS_PER_SECOND = 100;
-export const MARQUEE_RATE_TRANSITION_MS = 140;
+export const MARQUEE_RATE_FOLLOW_TIME_CONSTANT_MS = 52;
+export const MARQUEE_RESIZE_SETTLE_MS = 80;
 /** Blank space between repeated copies, relative to the active text viewport. */
 export const MARQUEE_COPY_GAP_RATIO = 0.5;
+
+export interface AdaptiveMarqueeSpeed {
+  requestedPixelsPerSecond: number;
+  effectivePixelsPerSecond: number;
+  cssPixelsPerFrame: number;
+  devicePixelsPerFrame: number;
+}
 
 export interface MarqueeGeometry {
   direction: MarqueeDirection;
@@ -45,6 +54,12 @@ interface UseMarqueeMotionOptions {
   speed: number;
   viewportRef: RefObject<HTMLElement>;
   controllerRef?: RefObject<MarqueeMotionController>;
+  devicePixelRatio?: number;
+  refreshRateHz?: number;
+}
+
+interface MarqueeMotionState {
+  runtimeBudgetExceeded: boolean;
 }
 
 /**
@@ -58,6 +73,63 @@ export function speedToPixelsPerSecond(speed: number): number {
     LIMITS.maxMarqueeSpeed,
   );
   return 24 + ((normalizedSpeed - 1) / 9) * 136;
+}
+
+/**
+ * Keeps motion below eight CSS pixels per displayed frame, then opportunistically
+ * snaps the step to a quarter physical pixel. A snap is rejected when it would
+ * make the requested speed more than three percent slower.
+ */
+export function resolveAdaptiveMarqueeSpeed(
+  requestedPxPerSecond: number,
+  refreshRateHz: number,
+  devicePixelRatio: number,
+): AdaptiveMarqueeSpeed {
+  const requestedPixelsPerSecond = Math.max(
+    0,
+    Number.isFinite(requestedPxPerSecond) ? requestedPxPerSecond : 0,
+  );
+  const refreshRate = clamp(
+    Number.isFinite(refreshRateHz) ? refreshRateHz : 60,
+    24,
+    360,
+  );
+  const ratio = clamp(
+    Number.isFinite(devicePixelRatio) ? devicePixelRatio : 1,
+    1,
+    8,
+  );
+  const cappedPixelsPerSecond = Math.min(
+    requestedPixelsPerSecond,
+    refreshRate * 8,
+  );
+  const unsnappedCssPixelsPerFrame = cappedPixelsPerSecond / refreshRate;
+  const unsnappedDevicePixelsPerFrame =
+    unsnappedCssPixelsPerFrame * ratio;
+  const alignedDevicePixelsPerFrame =
+    Math.floor(unsnappedDevicePixelsPerFrame * 4 + 1e-7) / 4;
+  const alignedPixelsPerSecond =
+    (alignedDevicePixelsPerFrame / ratio) * refreshRate;
+  const alignmentDeviation = cappedPixelsPerSecond > 0
+    ? (cappedPixelsPerSecond - alignedPixelsPerSecond) /
+      cappedPixelsPerSecond
+    : 0;
+  const useAlignment =
+    alignedDevicePixelsPerFrame > 0 &&
+    alignmentDeviation >= 0 &&
+    alignmentDeviation <= 0.03;
+  const effectivePixelsPerSecond = Math.min(
+    requestedPixelsPerSecond,
+    useAlignment ? alignedPixelsPerSecond : cappedPixelsPerSecond,
+  );
+  const cssPixelsPerFrame = effectivePixelsPerSecond / refreshRate;
+
+  return {
+    requestedPixelsPerSecond,
+    effectivePixelsPerSecond,
+    cssPixelsPerFrame,
+    devicePixelsPerFrame: cssPixelsPerFrame * ratio,
+  };
 }
 
 /**
@@ -133,25 +205,56 @@ export function calculateMarqueeGeometry(
   };
 }
 
-export function interpolatePlaybackRate(
-  startRate: number,
+export function followPlaybackRate(
+  currentRate: number,
   targetRate: number,
-  progress: number,
+  elapsedMs: number,
 ): number {
-  const clampedProgress = clamp(progress, 0, 1);
-  const eased = 1 - (1 - clampedProgress) ** 3;
-  return startRate + (targetRate - startRate) * eased;
+  const deltaMs = clamp(
+    Number.isFinite(elapsedMs) ? elapsedMs : 0,
+    0,
+    100,
+  );
+  const followAmount = 1 - Math.exp(
+    -deltaMs / MARQUEE_RATE_FOLLOW_TIME_CONSTANT_MS,
+  );
+  return currentRate + (targetRate - currentRate) * followAmount;
 }
 
-function sameGeometry(left: MarqueeGeometry, right: MarqueeGeometry): boolean {
+function sameGeometry(
+  left: MarqueeGeometry,
+  right: MarqueeGeometry,
+  devicePixelRatio: number,
+): boolean {
+  const threshold = 1 / Math.max(1, devicePixelRatio);
   return (
     left.direction === right.direction &&
-    Math.abs(left.startX - right.startX) < 0.25 &&
-    Math.abs(left.startY - right.startY) < 0.25 &&
-    Math.abs(left.endX - right.endX) < 0.25 &&
-    Math.abs(left.endY - right.endY) < 0.25 &&
-    Math.abs(left.copyGap - right.copyGap) < 0.25
+    Math.abs(left.startX - right.startX) < threshold &&
+    Math.abs(left.startY - right.startY) < threshold &&
+    Math.abs(left.endX - right.endX) < threshold &&
+    Math.abs(left.endY - right.endY) < threshold &&
+    Math.abs(left.copyGap - right.copyGap) < threshold
   );
+}
+
+export function measureUntransformedLayoutBox(element: HTMLElement): {
+  width: number;
+  height: number;
+} {
+  return {
+    width: Math.max(1, element.clientWidth, element.offsetWidth, element.scrollWidth),
+    height: Math.max(1, element.clientHeight, element.offsetHeight, element.scrollHeight),
+  };
+}
+
+function measureViewportLayoutBox(element: HTMLElement): {
+  width: number;
+  height: number;
+} {
+  return {
+    width: Math.max(1, element.clientWidth, element.offsetWidth),
+    height: Math.max(1, element.clientHeight, element.offsetHeight),
+  };
 }
 
 function animationProgress(animation: Animation, durationMs: number): number | null {
@@ -252,13 +355,23 @@ export function useMarqueeMotion({
   speed,
   viewportRef,
   controllerRef,
-}: UseMarqueeMotionOptions): void {
+  devicePixelRatio = window.devicePixelRatio || 1,
+  refreshRateHz = 60,
+}: UseMarqueeMotionOptions): MarqueeMotionState {
+  const [runtimeBudgetExceeded, setRuntimeBudgetExceeded] = useState(false);
   const animationsRef = useRef<Animation[]>([]);
   const geometryRef = useRef<MarqueeGeometry | null>(null);
   const geometryKeyRef = useRef("");
   const rebuildFrameRef = useRef<number | null>(null);
   const rateFrameRef = useRef<number | null>(null);
   const currentRateRef = useRef(1);
+  const targetRateRef = useRef(1);
+  const previousRateFrameTimeRef = useRef<number | null>(null);
+  const rebuildSettleTimerRef = useRef<number | null>(null);
+  const observedLayoutSizesRef = useRef<{
+    primary: { width: number; height: number } | null;
+    viewport: { width: number; height: number } | null;
+  }>({ primary: null, viewport: null });
   const speedRef = useRef(speed);
   const pausedRef = useRef(paused);
   const fallbackControllerRef = useRef<MarqueeMotionController>(null);
@@ -276,6 +389,10 @@ export function useMarqueeMotion({
       cancelAnimationFrame(rebuildFrameRef.current);
       rebuildFrameRef.current = null;
     }
+    if (rebuildSettleTimerRef.current !== null) {
+      window.clearTimeout(rebuildSettleTimerRef.current);
+      rebuildSettleTimerRef.current = null;
+    }
   }, []);
 
   const cancelRateTransition = useCallback(() => {
@@ -283,6 +400,7 @@ export function useMarqueeMotion({
       cancelAnimationFrame(rateFrameRef.current);
       rateFrameRef.current = null;
     }
+    previousRateFrameTimeRef.current = null;
   }, []);
 
   const cancelAnimations = useCallback(() => {
@@ -300,8 +418,12 @@ export function useMarqueeMotion({
     ) {
       return;
     }
-    const durationSeconds =
-      geometry.distance / speedToPixelsPerSecond(speedRef.current);
+    const effectiveSpeed = resolveAdaptiveMarqueeSpeed(
+      speedToPixelsPerSecond(speedRef.current),
+      refreshRateHz,
+      devicePixelRatio,
+    ).effectivePixelsPerSecond;
+    const durationSeconds = geometry.distance / Math.max(1, effectiveSpeed);
     moving.style.setProperty(
       "--marquee-fallback-duration",
       `${durationSeconds}s`,
@@ -310,23 +432,24 @@ export function useMarqueeMotion({
       "--marquee-fallback-half-delay",
       `${-durationSeconds / 2}s`,
     );
-  }, [movingRef]);
+  }, [devicePixelRatio, movingRef, refreshRateHz]);
 
   const transitionToSpeed = useCallback((nextSpeed: number) => {
     speedRef.current = nextSpeed;
     const animations = animationsRef.current;
+    targetRateRef.current = resolveAdaptiveMarqueeSpeed(
+      speedToPixelsPerSecond(nextSpeed),
+      refreshRateHz,
+      devicePixelRatio,
+    ).effectivePixelsPerSecond / MARQUEE_BASE_PIXELS_PER_SECOND;
     if (!enabled || animations.length === 0) {
       applyFallbackSpeed();
       return;
     }
 
-    cancelRateTransition();
-    const startRate = currentRateRef.current;
-    const targetRate =
-      speedToPixelsPerSecond(nextSpeed) / MARQUEE_BASE_PIXELS_PER_SECOND;
-    if (Math.abs(targetRate - startRate) < 0.0001) return;
-
-    const startedAt = performance.now();
+    // Input events only move the target. One persistent follower keeps its
+    // current velocity, so rapid slider updates cannot restart the easing.
+    if (rateFrameRef.current !== null) return;
     const update = (now: number) => {
       if (
         animationsRef.current.length !== animations.length ||
@@ -334,29 +457,36 @@ export function useMarqueeMotion({
           (animation, index) => animation !== animations[index],
         )
       ) {
+        rateFrameRef.current = null;
+        previousRateFrameTimeRef.current = null;
         return;
       }
-      const progress = Math.min(
-        1,
-        (now - startedAt) / MARQUEE_RATE_TRANSITION_MS,
-      );
-      const nextRate = interpolatePlaybackRate(
-        startRate,
-        targetRate,
-        progress,
+      const elapsedMs = previousRateFrameTimeRef.current === null
+        ? 1000 / Math.max(1, refreshRateHz)
+        : now - previousRateFrameTimeRef.current;
+      previousRateFrameTimeRef.current = now;
+      const nextRate = followPlaybackRate(
+        currentRateRef.current,
+        targetRateRef.current,
+        elapsedMs,
       );
       animations.forEach((animation) =>
         animation.updatePlaybackRate(nextRate),
       );
       currentRateRef.current = nextRate;
-      if (progress < 1) {
+      if (Math.abs(targetRateRef.current - nextRate) > 0.001) {
         rateFrameRef.current = requestAnimationFrame(update);
       } else {
+        animations.forEach((animation) =>
+          animation.updatePlaybackRate(targetRateRef.current),
+        );
+        currentRateRef.current = targetRateRef.current;
         rateFrameRef.current = null;
+        previousRateFrameTimeRef.current = null;
       }
     };
     rateFrameRef.current = requestAnimationFrame(update);
-  }, [applyFallbackSpeed, cancelRateTransition, enabled]);
+  }, [applyFallbackSpeed, devicePixelRatio, enabled, refreshRateHz]);
 
   useImperativeHandle(
     controllerRef ?? fallbackControllerRef,
@@ -379,16 +509,38 @@ export function useMarqueeMotion({
       return;
     }
 
-    const viewportRect = viewport.getBoundingClientRect();
-    const contentRect = primaryCopy.getBoundingClientRect();
+    const viewportBox = measureViewportLayoutBox(viewport);
+    const contentBox = measureUntransformedLayoutBox(primaryCopy);
+    const physicalContentWidth = Math.ceil(
+      contentBox.width * devicePixelRatio,
+    );
+    const physicalContentHeight = Math.ceil(
+      contentBox.height * devicePixelRatio,
+    );
+    if (
+      physicalContentWidth > LIMITS.maxMarqueeLayerDeviceWidthPx ||
+      physicalContentWidth * physicalContentHeight >
+        LIMITS.maxMarqueeLayerDeviceAreaPx
+    ) {
+      setRuntimeBudgetExceeded(true);
+      cancelRateTransition();
+      cancelAnimations();
+      geometryRef.current = null;
+      geometryKeyRef.current = "";
+      moving.classList.remove("uses-css-marquee");
+      moving.classList.add("is-marquee-suppressed");
+      removeGeometryProperties(moving);
+      return;
+    }
+    setRuntimeBudgetExceeded(false);
+    moving.classList.remove("is-marquee-suppressed");
     const nextGeometry = calculateMarqueeGeometry(
       direction,
-      viewportRect.width,
-      viewportRect.height,
-      contentRect.width,
-      contentRect.height,
+      viewportBox.width,
+      viewportBox.height,
+      contentBox.width,
+      contentBox.height,
     );
-    const devicePixelRatio = window.devicePixelRatio || 1;
     if (direction === "left" || direction === "right") {
       nextGeometry.startY = snapMarqueeCrossAxis(
         nextGeometry.startY,
@@ -406,7 +558,7 @@ export function useMarqueeMotion({
     if (
       geometryRef.current &&
       geometryKeyRef.current === nextGeometryKey &&
-      sameGeometry(geometryRef.current, nextGeometry)
+      sameGeometry(geometryRef.current, nextGeometry, devicePixelRatio)
     ) {
       return;
     }
@@ -435,10 +587,13 @@ export function useMarqueeMotion({
     geometryKeyRef.current = nextGeometryKey;
     setGeometryProperties(moving, nextGeometry);
 
-    const targetRate =
-      speedToPixelsPerSecond(speedRef.current) /
-      MARQUEE_BASE_PIXELS_PER_SECOND;
+    const targetRate = resolveAdaptiveMarqueeSpeed(
+      speedToPixelsPerSecond(speedRef.current),
+      refreshRateHz,
+      devicePixelRatio,
+    ).effectivePixelsPerSecond / MARQUEE_BASE_PIXELS_PER_SECOND;
     currentRateRef.current = targetRate;
+    targetRateRef.current = targetRate;
 
     if (
       typeof primaryCopy.animate !== "function" ||
@@ -495,24 +650,42 @@ export function useMarqueeMotion({
     cancelAnimations,
     cancelRateTransition,
     direction,
+    devicePixelRatio,
     enabled,
     movingRef,
     primaryCopyRef,
     secondaryCopyRef,
+    refreshRateHz,
     viewportRef,
   ]);
 
   const scheduleRebuild = useCallback(() => {
-    if (rebuildFrameRef.current !== null) return;
-    rebuildFrameRef.current = requestAnimationFrame(() => {
-      rebuildFrameRef.current = null;
-      rebuild();
-    });
+    // Rebuild immediately at the beginning of a resize burst, then exactly
+    // once more after layout settles. Intermediate observer noise is ignored.
+    const startsNewBurst = rebuildSettleTimerRef.current === null;
+    if (startsNewBurst && rebuildFrameRef.current === null) {
+      rebuildFrameRef.current = requestAnimationFrame(() => {
+        rebuildFrameRef.current = null;
+        rebuild();
+      });
+    }
+    if (rebuildSettleTimerRef.current !== null) {
+      window.clearTimeout(rebuildSettleTimerRef.current);
+    }
+    rebuildSettleTimerRef.current = window.setTimeout(() => {
+      rebuildSettleTimerRef.current = null;
+      if (rebuildFrameRef.current !== null) return;
+      rebuildFrameRef.current = requestAnimationFrame(() => {
+        rebuildFrameRef.current = null;
+        rebuild();
+      });
+    }, MARQUEE_RESIZE_SETTLE_MS);
   }, [rebuild]);
 
   useLayoutEffect(() => {
     const moving = movingRef.current;
     if (!enabled) {
+      setRuntimeBudgetExceeded(false);
       cancelRebuild();
       cancelRateTransition();
       cancelAnimations();
@@ -526,9 +699,33 @@ export function useMarqueeMotion({
     }
 
     scheduleRebuild();
-    const observer = new ResizeObserver(scheduleRebuild);
-    if (viewportRef.current) observer.observe(viewportRef.current);
-    if (primaryCopyRef.current) observer.observe(primaryCopyRef.current);
+    const viewportElement = viewportRef.current;
+    const primaryElement = primaryCopyRef.current;
+    const observer = new ResizeObserver((entries) => {
+      let materialChange = false;
+      for (const entry of entries) {
+        const boxSize = entry.contentBoxSize;
+        const firstBox = Array.isArray(boxSize) ? boxSize[0] : boxSize;
+        const next = {
+          width: firstBox?.inlineSize ?? entry.contentRect.width,
+          height: firstBox?.blockSize ?? entry.contentRect.height,
+        };
+        const key = entry.target === viewportElement ? "viewport" : "primary";
+        const previous = observedLayoutSizesRef.current[key];
+        observedLayoutSizesRef.current[key] = next;
+        if (
+          !previous ||
+          Math.abs(next.width - previous.width) * devicePixelRatio >= 1 ||
+          Math.abs(next.height - previous.height) * devicePixelRatio >= 1
+        ) {
+          materialChange = true;
+        }
+      }
+      if (materialChange) scheduleRebuild();
+    });
+    observedLayoutSizesRef.current = { primary: null, viewport: null };
+    if (viewportElement) observer.observe(viewportElement);
+    if (primaryElement) observer.observe(primaryElement);
     return () => {
       cancelRebuild();
       observer.disconnect();
@@ -538,6 +735,7 @@ export function useMarqueeMotion({
     cancelAnimations,
     cancelRateTransition,
     cancelRebuild,
+    devicePixelRatio,
     direction,
     enabled,
     fontSize,
@@ -569,4 +767,6 @@ export function useMarqueeMotion({
     },
     [cancelAnimations, cancelRateTransition, cancelRebuild],
   );
+
+  return { runtimeBudgetExceeded };
 }

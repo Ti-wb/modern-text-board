@@ -23,6 +23,14 @@ export default defineConfig({
     { name: "chromium-1024x768", use: { ...devices["Desktop Chrome"], viewport: { width: 1024, height: 768 } } },
     { name: "chromium-1280x800", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } } },
     { name: "chromium-1440x900", use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } } },
+    {
+      name: "chromium-dpr3",
+      use: {
+        ...devices["Desktop Chrome"],
+        deviceScaleFactor: 3,
+        viewport: { width: 1024, height: 768 },
+      },
+    },
     { name: "firefox", use: { ...devices["Desktop Firefox"] } },
     { name: "webkit", use: { ...devices["Desktop Safari"] } },
     {

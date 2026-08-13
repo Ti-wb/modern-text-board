@@ -19,11 +19,18 @@ function renderCanvas(overrides = {}) {
 
   const view = render(
     <BoardCanvas
+      devicePixelRatio={2}
+      displayCadence={{
+        refreshRateHz: 60,
+        frameIntervalMs: 1000 / 60,
+        status: "stable",
+      }}
       editHint="Double-click to edit"
       marqueeControllerRef={{ current: null }}
       page={page}
       paused={false}
       placeholder="Tap to enter text"
+      overflowWarning="Try shortening the text"
       presentation={false}
       qrError="Unable to create QR"
       {...handlers}
@@ -75,6 +82,12 @@ describe("BoardCanvas", () => {
     const page = createDefaultPage("page-2", "Page 2");
     render(
       <BoardCanvas
+        devicePixelRatio={2}
+        displayCadence={{
+          refreshRateHz: 60,
+          frameIntervalMs: 1000 / 60,
+          status: "stable",
+        }}
         editHint="Double-click to edit"
         marqueeControllerRef={{ current: null }}
         onEdit={vi.fn()}
@@ -84,6 +97,7 @@ describe("BoardCanvas", () => {
         page={page}
         paused={false}
         placeholder="Tap to enter text"
+        overflowWarning="Try shortening the text"
         presentation
         qrError="Unable to create QR"
       />
@@ -115,6 +129,9 @@ describe("BoardCanvas", () => {
     expect(copies).toHaveLength(2);
     expect(copies[0].getAttribute("aria-hidden")).toBe("false");
     expect(copies[1].getAttribute("aria-hidden")).toBe("true");
+    expect(displayed!.closest(".moving-text")?.className).not.toContain(
+      "is-marquee-suppressed",
+    );
     expect(getComputedStyle(copies[0]).willChange).toBe("transform");
     expect(getComputedStyle(displayed!.closest(".moving-text")!).willChange).not.toBe("transform");
     expect(screen.getByRole("main").classList.contains("board-dark")).toBe(true);
