@@ -16,14 +16,17 @@ export type MarqueeDirection = "left" | "right" | "up" | "down";
 
 export type ToolbarEdge = "top" | "bottom";
 
-export interface BoardPageV1 {
+export interface BoardPageV2 {
   id: string;
   name: string;
   text: string;
   theme: Theme;
   textColor: "auto" | string;
   fontFamily: FontFamily;
+  /** Legacy pixel cap, retained so existing v1 boards render unchanged. */
   maxFontSizePx: number;
+  /** Relative fill target used after the responsive size control is adjusted. */
+  fontScalePercent: number | null;
   fontWeight: FontWeight;
   textAlign: TextAlign;
   mirrored: boolean;
@@ -39,12 +42,12 @@ export interface BoardPageV1 {
   };
 }
 
-export interface WorkspaceV1 {
-  pages: BoardPageV1[];
+export interface WorkspaceV2 {
+  pages: BoardPageV2[];
   activePageId: string;
 }
 
-export interface PreferencesV1 {
+export interface PreferencesV2 {
   locale: Locale;
   toolbar: {
     edge: ToolbarEdge;
@@ -56,35 +59,35 @@ export interface PreferencesV1 {
   pauseAnimations: boolean;
 }
 
-export interface ExportV1 {
+export interface ExportV2 {
   format: "simple-white-board";
-  schemaVersion: 1;
+  schemaVersion: 2;
   exportedAt: string;
-  workspace: WorkspaceV1;
-  preferences: PreferencesV1;
+  workspace: WorkspaceV2;
+  preferences: PreferencesV2;
 }
 
-export interface WorkspaceStorageEnvelopeV1 {
+export interface WorkspaceStorageEnvelopeV2 {
   format: "simple-white-board/local-workspace";
-  schemaVersion: 1;
+  schemaVersion: 2;
   revision: number;
   savedAt: string;
   writerId: string;
-  workspace: WorkspaceV1;
+  workspace: WorkspaceV2;
 }
 
-export interface PreferencesStorageEnvelopeV1 {
+export interface PreferencesStorageEnvelopeV2 {
   format: "simple-white-board/local-preferences";
-  schemaVersion: 1;
+  schemaVersion: 2;
   revision: number;
   savedAt: string;
   writerId: string;
-  preferences: PreferencesV1;
+  preferences: PreferencesV2;
 }
 
-export interface ImportTransactionJournalV1 {
+export interface ImportTransactionJournalV2 {
   format: "simple-white-board/import-transaction";
-  schemaVersion: 1;
+  schemaVersion: 2;
   transactionId: string;
   createdAt: string;
   previousWorkspace: string | null;
@@ -92,7 +95,7 @@ export interface ImportTransactionJournalV1 {
 }
 
 export type WorkspaceAction =
-  | { type: "workspace/replace"; workspace: WorkspaceV1 }
+  | { type: "workspace/replace"; workspace: WorkspaceV2 }
   | { type: "page/add"; id: string; name: string; afterPageId?: string }
   | {
       type: "page/duplicate";
@@ -112,6 +115,7 @@ export type WorkspaceAction =
   | { type: "page/set-text-color"; pageId: string; color: "auto" | string }
   | { type: "page/set-font-family"; pageId: string; fontFamily: FontFamily }
   | { type: "page/set-font-size"; pageId: string; sizePx: number }
+  | { type: "page/set-font-scale"; pageId: string; percent: number }
   | { type: "page/set-font-weight"; pageId: string; fontWeight: FontWeight }
   | { type: "page/toggle-bold"; pageId: string }
   | { type: "page/set-text-align"; pageId: string; textAlign: TextAlign }
@@ -129,7 +133,7 @@ export type WorkspaceAction =
   | { type: "page/set-qr-payload"; pageId: string; payload: string | null };
 
 export type PreferencesAction =
-  | { type: "preferences/replace"; preferences: PreferencesV1 }
+  | { type: "preferences/replace"; preferences: PreferencesV2 }
   | { type: "preferences/set-locale"; locale: Locale }
   | { type: "preferences/set-toolbar-edge"; edge: ToolbarEdge }
   | { type: "preferences/set-toolbar-offset"; offsetRatio: number }

@@ -2,12 +2,12 @@ import * as v from "valibot";
 
 import { LIMITS, SCHEMA_VERSION, codePointLength, utf8ByteLength } from "./defaults";
 import type {
-  ExportV1,
-  ImportTransactionJournalV1,
-  PreferencesStorageEnvelopeV1,
-  PreferencesV1,
-  WorkspaceStorageEnvelopeV1,
-  WorkspaceV1,
+  ExportV2,
+  ImportTransactionJournalV2,
+  PreferencesStorageEnvelopeV2,
+  PreferencesV2,
+  WorkspaceStorageEnvelopeV2,
+  WorkspaceV2,
 } from "./types";
 
 export type ValidationErrorCode =
@@ -64,49 +64,65 @@ const qrPayload = v.nullable(
   ),
 );
 
-export const BoardPageV1Schema = v.pipe(
-  v.strictObject({
-    id: nonEmptyString,
-    name: pageName,
-    text: boardText,
-    theme: v.picklist(["light", "dark"]),
-    textColor: v.union([
-      v.literal("auto"),
-      v.pipe(v.string(), v.regex(/^#[0-9a-f]{6}$/i, "Invalid hex color")),
-    ]),
-    fontFamily: v.picklist([
-      "system-sans",
-      "system-rounded",
-      "system-serif",
-      "system-mono",
-    ]),
-    maxFontSizePx: v.pipe(
-      v.number(),
-      v.finite(),
-      v.integer(),
-      v.minValue(LIMITS.minFontSizePx),
-      v.maxValue(LIMITS.maxFontSizePx),
-    ),
-    fontWeight: v.picklist([300, 400, 700, 900]),
-    textAlign: v.picklist(["left", "center", "right"]),
-    mirrored: v.boolean(),
-    marquee: v.strictObject({
-      enabled: v.boolean(),
-      direction: v.picklist(["left", "right", "up", "down"]),
-      speed: v.pipe(
+const BoardPageV2InputSchema = v.strictObject({
+  id: nonEmptyString,
+  name: pageName,
+  text: boardText,
+  theme: v.picklist(["light", "dark"]),
+  textColor: v.union([
+    v.literal("auto"),
+    v.pipe(v.string(), v.regex(/^#[0-9a-f]{6}$/i, "Invalid hex color")),
+  ]),
+  fontFamily: v.picklist([
+    "system-sans",
+    "system-rounded",
+    "system-serif",
+    "system-mono",
+  ]),
+  maxFontSizePx: v.pipe(
+    v.number(),
+    v.finite(),
+    v.integer(),
+    v.minValue(LIMITS.minFontSizePx),
+    v.maxValue(LIMITS.maxFontSizePx),
+  ),
+  fontScalePercent: v.optional(
+    v.nullable(
+      v.pipe(
         v.number(),
         v.finite(),
         v.integer(),
-        v.minValue(LIMITS.minMarqueeSpeed),
-        v.maxValue(LIMITS.maxMarqueeSpeed),
+        v.minValue(LIMITS.minFontScalePercent),
+        v.maxValue(LIMITS.maxFontScalePercent),
       ),
-    }),
-    flashEnabled: v.boolean(),
-    qr: v.strictObject({
-      enabled: v.boolean(),
-      payload: qrPayload,
-    }),
+    ),
+  ),
+  fontWeight: v.picklist([300, 400, 700, 900]),
+  textAlign: v.picklist(["left", "center", "right"]),
+  mirrored: v.boolean(),
+  marquee: v.strictObject({
+    enabled: v.boolean(),
+    direction: v.picklist(["left", "right", "up", "down"]),
+    speed: v.pipe(
+      v.number(),
+      v.finite(),
+      v.minValue(LIMITS.minMarqueeSpeed),
+      v.maxValue(LIMITS.maxMarqueeSpeed),
+    ),
   }),
+  flashEnabled: v.boolean(),
+  qr: v.strictObject({
+    enabled: v.boolean(),
+    payload: qrPayload,
+  }),
+});
+
+export const BoardPageV2Schema = v.pipe(
+  BoardPageV2InputSchema,
+  v.transform((page) => ({
+    ...page,
+    fontScalePercent: page.fontScalePercent ?? null,
+  })),
   v.check(
     (page) =>
       !page.qr.enabled ||
@@ -115,10 +131,10 @@ export const BoardPageV1Schema = v.pipe(
   ),
 );
 
-export const WorkspaceV1Schema = v.pipe(
+export const WorkspaceV2Schema = v.pipe(
   v.strictObject({
     pages: v.pipe(
-      v.array(BoardPageV1Schema),
+      v.array(BoardPageV2Schema),
       v.minLength(1),
       v.maxLength(LIMITS.maxPages),
     ),
@@ -142,7 +158,7 @@ export const WorkspaceV1Schema = v.pipe(
 
 const ratio = v.pipe(v.number(), v.finite(), v.minValue(0), v.maxValue(1));
 
-const ToolbarPreferencesV1Schema = v.pipe(
+const ToolbarPreferencesV2Schema = v.pipe(
   v.strictObject({
     edge: v.picklist(["top", "bottom"]),
     offsetRatio: ratio,
@@ -156,40 +172,40 @@ const ToolbarPreferencesV1Schema = v.pipe(
   })),
 );
 
-export const PreferencesV1Schema = v.strictObject({
+export const PreferencesV2Schema = v.strictObject({
   locale: v.picklist(["zh-TW", "en"]),
-  toolbar: ToolbarPreferencesV1Schema,
+  toolbar: ToolbarPreferencesV2Schema,
   keepScreenAwake: v.boolean(),
   pauseAnimations: v.boolean(),
 });
 
-export const ExportV1Schema = v.strictObject({
+export const ExportV2Schema = v.strictObject({
   format: v.literal("simple-white-board"),
   schemaVersion: v.literal(SCHEMA_VERSION),
   exportedAt: isoDateString,
-  workspace: WorkspaceV1Schema,
-  preferences: PreferencesV1Schema,
+  workspace: WorkspaceV2Schema,
+  preferences: PreferencesV2Schema,
 });
 
-export const WorkspaceStorageEnvelopeV1Schema = v.strictObject({
+export const WorkspaceStorageEnvelopeV2Schema = v.strictObject({
   format: v.literal("simple-white-board/local-workspace"),
   schemaVersion: v.literal(SCHEMA_VERSION),
   revision: nonNegativeInteger,
   savedAt: isoDateString,
   writerId: nonEmptyString,
-  workspace: WorkspaceV1Schema,
+  workspace: WorkspaceV2Schema,
 });
 
-export const PreferencesStorageEnvelopeV1Schema = v.strictObject({
+export const PreferencesStorageEnvelopeV2Schema = v.strictObject({
   format: v.literal("simple-white-board/local-preferences"),
   schemaVersion: v.literal(SCHEMA_VERSION),
   revision: nonNegativeInteger,
   savedAt: isoDateString,
   writerId: nonEmptyString,
-  preferences: PreferencesV1Schema,
+  preferences: PreferencesV2Schema,
 });
 
-export const ImportTransactionJournalV1Schema = v.strictObject({
+export const ImportTransactionJournalV2Schema = v.strictObject({
   format: v.literal("simple-white-board/import-transaction"),
   schemaVersion: v.literal(SCHEMA_VERSION),
   transactionId: nonEmptyString,
@@ -239,7 +255,7 @@ function checkDiscriminator(
     };
   }
 
-  if (input.schemaVersion !== SCHEMA_VERSION) {
+  if (input.schemaVersion !== 1 && input.schemaVersion !== SCHEMA_VERSION) {
     return {
       success: false,
       error: {
@@ -249,11 +265,17 @@ function checkDiscriminator(
     };
   }
 
-  return { success: true, data: input };
+  return {
+    success: true,
+    data:
+      input.schemaVersion === SCHEMA_VERSION
+        ? input
+        : { ...input, schemaVersion: SCHEMA_VERSION },
+  };
 }
 
-export function validateWorkspace(input: unknown): ValidationResult<WorkspaceV1> {
-  const result = validateWithSchema<WorkspaceV1>(WorkspaceV1Schema, input);
+export function validateWorkspace(input: unknown): ValidationResult<WorkspaceV2> {
+  const result = validateWithSchema<WorkspaceV2>(WorkspaceV2Schema, input);
   if (
     !result.success &&
     result.error.issues?.some((issue) => issue.includes("Workspace must be at most"))
@@ -266,54 +288,54 @@ export function validateWorkspace(input: unknown): ValidationResult<WorkspaceV1>
   return result;
 }
 
-export function validatePreferences(input: unknown): ValidationResult<PreferencesV1> {
-  return validateWithSchema<PreferencesV1>(PreferencesV1Schema, input);
+export function validatePreferences(input: unknown): ValidationResult<PreferencesV2> {
+  return validateWithSchema<PreferencesV2>(PreferencesV2Schema, input);
 }
 
-export function validateExport(input: unknown): ValidationResult<ExportV1> {
+export function validateExport(input: unknown): ValidationResult<ExportV2> {
   const header = checkDiscriminator(input, "simple-white-board");
   return header.success
-    ? validateWithSchema<ExportV1>(ExportV1Schema, input)
+    ? validateWithSchema<ExportV2>(ExportV2Schema, header.data)
     : header;
 }
 
 export function validateWorkspaceStorageEnvelope(
   input: unknown,
-): ValidationResult<WorkspaceStorageEnvelopeV1> {
+): ValidationResult<WorkspaceStorageEnvelopeV2> {
   const header = checkDiscriminator(input, "simple-white-board/local-workspace");
   return header.success
-    ? validateWithSchema<WorkspaceStorageEnvelopeV1>(WorkspaceStorageEnvelopeV1Schema, input)
+    ? validateWithSchema<WorkspaceStorageEnvelopeV2>(WorkspaceStorageEnvelopeV2Schema, header.data)
     : header;
 }
 
 export function validatePreferencesStorageEnvelope(
   input: unknown,
-): ValidationResult<PreferencesStorageEnvelopeV1> {
+): ValidationResult<PreferencesStorageEnvelopeV2> {
   const header = checkDiscriminator(input, "simple-white-board/local-preferences");
   return header.success
-    ? validateWithSchema<PreferencesStorageEnvelopeV1>(
-        PreferencesStorageEnvelopeV1Schema,
-        input,
+    ? validateWithSchema<PreferencesStorageEnvelopeV2>(
+        PreferencesStorageEnvelopeV2Schema,
+        header.data,
       )
     : header;
 }
 
 export function validateImportTransactionJournal(
   input: unknown,
-): ValidationResult<ImportTransactionJournalV1> {
+): ValidationResult<ImportTransactionJournalV2> {
   const header = checkDiscriminator(
     input,
     "simple-white-board/import-transaction",
   );
   return header.success
-    ? validateWithSchema<ImportTransactionJournalV1>(
-        ImportTransactionJournalV1Schema,
-        input,
+    ? validateWithSchema<ImportTransactionJournalV2>(
+        ImportTransactionJournalV2Schema,
+        header.data,
       )
     : header;
 }
 
-export function parseExportJson(json: string): ValidationResult<ExportV1> {
+export function parseExportJson(json: string): ValidationResult<ExportV2> {
   if (utf8ByteLength(json) > LIMITS.maxImportFileBytes) {
     return {
       success: false,

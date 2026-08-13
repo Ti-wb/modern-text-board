@@ -25,7 +25,7 @@ import {
   parseImport,
   serializeExport
 } from "./domain/storage";
-import type { ExportV1, Locale } from "./domain/types";
+import type { ExportV2, Locale } from "./domain/types";
 import { applyDocumentLocale, getTranslator, resolveLocale } from "./i18n";
 import { useDomainPersistence } from "./hooks/useDomainPersistence";
 import {
@@ -101,9 +101,11 @@ export function App() {
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [editing, setEditing] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [importPreview, setImportPreview] = useState<ExportV1 | null>(null);
+  const [importPreview, setImportPreview] = useState<ExportV2 | null>(null);
   const [presentation, setPresentation] = useState(false);
   const [effectiveSize, setEffectiveSize] = useState(80);
+  const [maxFittingSize, setMaxFittingSize] = useState(80);
+  const [fillReferenceSize, setFillReferenceSize] = useState(80);
   const [fitOverflow, setFitOverflow] = useState(false);
   const [customColorDraft, setCustomColorDraft] = useState("#007AFF");
   const [customColorError, setCustomColorError] = useState<string | undefined>();
@@ -479,8 +481,10 @@ export function App() {
       <BoardCanvas
         editHint={locale === "zh-TW" ? "雙擊畫面編輯文字" : "Double-click the board to edit"}
         onEdit={() => setEditing(true)}
-        onFitChange={(size, overflow) => {
+        onFitChange={(size, overflow, fittingSize, referenceSize) => {
           setEffectiveSize(size);
+          setMaxFittingSize(fittingSize);
+          setFillReferenceSize(referenceSize);
           setFitOverflow(overflow);
         }}
         onInteraction={activateToolbar}
@@ -553,12 +557,19 @@ export function App() {
             offsetRatio={preferences.toolbar.offsetRatio}
             font={{
               fontFamily: page.fontFamily,
-              maxFontSizePx: page.maxFontSizePx,
+              fontScalePercent: page.fontScalePercent,
+              legacyMaxFontSizePx: page.maxFontSizePx,
+              fillReferenceFontSizePx: fillReferenceSize,
+              maxFittingFontSizePx: maxFittingSize,
               effectiveFontSizePx: effectiveSize,
               fontWeight: page.fontWeight,
               fitOverflow,
               onFontFamilyChange: (fontFamily) => dispatchWorkspace({ type: "page/set-font-family", pageId: page.id, fontFamily }),
-              onFontSizeChange: (sizePx) => dispatchWorkspace({ type: "page/set-font-size", pageId: page.id, sizePx }),
+              onFontScaleChange: (percent) => dispatchWorkspace({
+                type: "page/set-font-scale",
+                pageId: page.id,
+                percent,
+              }),
               onFontWeightChange: (fontWeight) => dispatchWorkspace({ type: "page/set-font-weight", pageId: page.id, fontWeight })
             }}
             kind={panel}
@@ -651,6 +662,7 @@ export function App() {
       {editing ? (
         <TextEditor
           effectiveFontSizePx={effectiveSize}
+          fontScalePercent={page.fontScalePercent}
           fitOverflow={fitOverflow}
           locale={locale}
           maxCodePoints={LIMITS.maxTextCodePoints}

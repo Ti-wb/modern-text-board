@@ -1,8 +1,8 @@
-import type { ExportV1, Locale } from "../domain/types";
+import type { ExportV2, Locale } from "../domain/types";
 import { Modal } from "./Modal";
 
 export interface ImportPreviewProps {
-  data: ExportV1;
+  data: ExportV2;
   locale: Locale;
   onCancel: () => void;
   onConfirm: () => void;

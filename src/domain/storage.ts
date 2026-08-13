@@ -8,13 +8,13 @@ import {
   utf8ByteLength,
 } from "./defaults";
 import type {
-  ExportV1,
-  ImportTransactionJournalV1,
+  ExportV2,
+  ImportTransactionJournalV2,
   Locale,
-  PreferencesStorageEnvelopeV1,
-  PreferencesV1,
-  WorkspaceStorageEnvelopeV1,
-  WorkspaceV1,
+  PreferencesStorageEnvelopeV2,
+  PreferencesV2,
+  WorkspaceStorageEnvelopeV2,
+  WorkspaceV2,
 } from "./types";
 import {
   parseExportJson,
@@ -65,13 +65,13 @@ export interface SaveOptions {
 }
 
 export interface HydratedDomainData {
-  workspace: WorkspaceV1;
-  preferences: PreferencesV1;
+  workspace: WorkspaceV2;
+  preferences: PreferencesV2;
   workspaceRevision: number;
   preferencesRevision: number;
   autosaveAllowed: boolean;
-  workspaceLoad: StorageLoadResult<WorkspaceStorageEnvelopeV1>;
-  preferencesLoad: StorageLoadResult<PreferencesStorageEnvelopeV1>;
+  workspaceLoad: StorageLoadResult<WorkspaceStorageEnvelopeV2>;
+  preferencesLoad: StorageLoadResult<PreferencesStorageEnvelopeV2>;
 }
 
 function defaultStorage(): StorageLike | null {
@@ -132,13 +132,13 @@ function loadEnvelope<T>(
 
 export function loadWorkspace(
   storage: StorageLike | null = defaultStorage(),
-): StorageLoadResult<WorkspaceStorageEnvelopeV1> {
+): StorageLoadResult<WorkspaceStorageEnvelopeV2> {
   return loadEnvelope(STORAGE_KEYS.workspace, validateWorkspaceStorageEnvelope, storage);
 }
 
 export function loadPreferences(
   storage: StorageLike | null = defaultStorage(),
-): StorageLoadResult<PreferencesStorageEnvelopeV1> {
+): StorageLoadResult<PreferencesStorageEnvelopeV2> {
   return loadEnvelope(
     STORAGE_KEYS.preferences,
     validatePreferencesStorageEnvelope,
@@ -221,11 +221,11 @@ export function hydrateDomainData(
 ): HydratedDomainData {
   const recovery = recoverImportTransaction(storage);
   if (!recovery.success) {
-    const workspaceLoad: StorageLoadResult<WorkspaceStorageEnvelopeV1> = {
+    const workspaceLoad: StorageLoadResult<WorkspaceStorageEnvelopeV2> = {
       status: "unavailable",
       error: recovery.error,
     };
-    const preferencesLoad: StorageLoadResult<PreferencesStorageEnvelopeV1> = {
+    const preferencesLoad: StorageLoadResult<PreferencesStorageEnvelopeV2> = {
       status: "unavailable",
       error: recovery.error,
     };
@@ -300,9 +300,9 @@ function invalidWriterResult<T>(): StorageSaveResult<T> {
 }
 
 export function saveWorkspace(
-  workspace: WorkspaceV1,
+  workspace: WorkspaceV2,
   options: SaveOptions,
-): StorageSaveResult<WorkspaceStorageEnvelopeV1> {
+): StorageSaveResult<WorkspaceStorageEnvelopeV2> {
   if (options.writerId.trim().length === 0) return invalidWriterResult();
   const validation = validateWorkspace(workspace);
   if (!validation.success) {
@@ -319,7 +319,7 @@ export function saveWorkspace(
     };
   }
 
-  const envelope: WorkspaceStorageEnvelopeV1 = {
+  const envelope: WorkspaceStorageEnvelopeV2 = {
     format: "simple-white-board/local-workspace",
     schemaVersion: SCHEMA_VERSION,
     revision: nextRevision(options.revision),
@@ -335,9 +335,9 @@ export function saveWorkspace(
 }
 
 export function savePreferences(
-  preferences: PreferencesV1,
+  preferences: PreferencesV2,
   options: SaveOptions,
-): StorageSaveResult<PreferencesStorageEnvelopeV1> {
+): StorageSaveResult<PreferencesStorageEnvelopeV2> {
   if (options.writerId.trim().length === 0) return invalidWriterResult();
   const validation = validatePreferences(preferences);
   if (!validation.success) {
@@ -351,7 +351,7 @@ export function savePreferences(
     };
   }
 
-  const envelope: PreferencesStorageEnvelopeV1 = {
+  const envelope: PreferencesStorageEnvelopeV2 = {
     format: "simple-white-board/local-preferences",
     schemaVersion: SCHEMA_VERSION,
     revision: Math.max(0, Math.trunc(options.revision ?? 0)) + 1,
@@ -367,10 +367,10 @@ export function savePreferences(
 }
 
 export function createExport(
-  workspace: WorkspaceV1,
-  preferences: PreferencesV1,
+  workspace: WorkspaceV2,
+  preferences: PreferencesV2,
   now: Date = new Date(),
-): ExportV1 {
+): ExportV2 {
   return {
     format: "simple-white-board",
     schemaVersion: SCHEMA_VERSION,
@@ -380,7 +380,7 @@ export function createExport(
   };
 }
 
-export function serializeExport(data: ExportV1, formatted = true): string {
+export function serializeExport(data: ExportV2, formatted = true): string {
   const result = validateExport(data);
   if (!result.success) {
     throw new TypeError(result.error.message);
@@ -403,13 +403,13 @@ export interface ImportCommitOptions {
 export type ImportCommitResult =
   | {
       success: true;
-      workspace: WorkspaceStorageEnvelopeV1;
-      preferences: PreferencesStorageEnvelopeV1;
+      workspace: WorkspaceStorageEnvelopeV2;
+      preferences: PreferencesStorageEnvelopeV2;
     }
   | { success: false; error: StorageFailure };
 
 export function commitImport(
-  data: ExportV1,
+  data: ExportV2,
   options: ImportCommitOptions,
 ): ImportCommitResult {
   const validation = validateExport(data);
@@ -455,7 +455,7 @@ export function commitImport(
 
   const now = options.now ?? (() => new Date());
   const savedAt = now().toISOString();
-  const journal: ImportTransactionJournalV1 = {
+  const journal: ImportTransactionJournalV2 = {
     format: "simple-white-board/import-transaction",
     schemaVersion: SCHEMA_VERSION,
     transactionId: createId(),
@@ -470,7 +470,7 @@ export function commitImport(
   );
   if (!savedJournal.success) return savedJournal;
 
-  const preferences: PreferencesStorageEnvelopeV1 = {
+  const preferences: PreferencesStorageEnvelopeV2 = {
     format: "simple-white-board/local-preferences",
     schemaVersion: SCHEMA_VERSION,
     revision: nextRevision(options.preferencesRevision),
@@ -488,7 +488,7 @@ export function commitImport(
     return savedPreferences;
   }
 
-  const workspace: WorkspaceStorageEnvelopeV1 = {
+  const workspace: WorkspaceStorageEnvelopeV2 = {
     format: "simple-white-board/local-workspace",
     schemaVersion: SCHEMA_VERSION,
     revision: nextRevision(options.workspaceRevision),
@@ -528,7 +528,7 @@ export interface AutosaveSnapshot {
   dirty: boolean;
   revision: number;
   error?: StorageFailure;
-  conflict?: WorkspaceStorageEnvelopeV1;
+  conflict?: WorkspaceStorageEnvelopeV2;
 }
 
 export interface WorkspaceAutosaveOptions {
@@ -541,11 +541,11 @@ export interface WorkspaceAutosaveOptions {
 }
 
 export interface WorkspaceAutosaveController {
-  schedule(workspace: WorkspaceV1): void;
-  flush(): StorageSaveResult<WorkspaceStorageEnvelopeV1> | null;
+  schedule(workspace: WorkspaceV2): void;
+  flush(): StorageSaveResult<WorkspaceStorageEnvelopeV2> | null;
   cancel(): void;
   receiveExternal(raw: string): ExternalWorkspaceUpdate;
-  resolveConflict(choice: "remote" | "local"): WorkspaceV1 | null;
+  resolveConflict(choice: "remote" | "local"): WorkspaceV2 | null;
   getSnapshot(): AutosaveSnapshot;
   dispose(): void;
 }
@@ -553,8 +553,8 @@ export interface WorkspaceAutosaveController {
 export type ExternalWorkspaceUpdate =
   | { kind: "ignored" }
   | { kind: "invalid"; error: DomainValidationError }
-  | { kind: "apply"; envelope: WorkspaceStorageEnvelopeV1 }
-  | { kind: "conflict"; envelope: WorkspaceStorageEnvelopeV1 };
+  | { kind: "apply"; envelope: WorkspaceStorageEnvelopeV2 }
+  | { kind: "conflict"; envelope: WorkspaceStorageEnvelopeV2 };
 
 export function createWorkspaceAutosave(
   options: WorkspaceAutosaveOptions,
@@ -562,11 +562,11 @@ export function createWorkspaceAutosave(
   const storage = options.storage === undefined ? defaultStorage() : options.storage;
   const delayMs = options.delayMs ?? 300;
   let revision = Math.max(0, Math.trunc(options.revision ?? 0));
-  let pending: WorkspaceV1 | null = null;
+  let pending: WorkspaceV2 | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let status: AutosaveStatus = "idle";
   let error: StorageFailure | undefined;
-  let conflict: WorkspaceStorageEnvelopeV1 | undefined;
+  let conflict: WorkspaceStorageEnvelopeV2 | undefined;
 
   const snapshot = (): AutosaveSnapshot => ({
     status,
@@ -679,6 +679,6 @@ export function isImportFileSizeAllowed(size: number): boolean {
   return Number.isFinite(size) && size >= 0 && size <= LIMITS.maxImportFileBytes;
 }
 
-export function isWorkspaceSizeAllowed(workspace: WorkspaceV1): boolean {
+export function isWorkspaceSizeAllowed(workspace: WorkspaceV2): boolean {
   return utf8ByteLength(JSON.stringify(workspace)) <= LIMITS.maxWorkspaceBytes;
 }

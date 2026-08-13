@@ -2,27 +2,28 @@ import { act, renderHook } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  SCHEMA_VERSION,
   STORAGE_KEYS,
   createDefaultPreferences,
   createDefaultWorkspace
 } from "../domain/defaults";
 import { createExport } from "../domain/storage";
 import type {
-  PreferencesStorageEnvelopeV1,
-  PreferencesV1,
-  WorkspaceStorageEnvelopeV1,
-  WorkspaceV1
+  PreferencesStorageEnvelopeV2,
+  PreferencesV2,
+  WorkspaceStorageEnvelopeV2,
+  WorkspaceV2
 } from "../domain/types";
 import { useDomainPersistence } from "./useDomainPersistence";
 
 interface HookProps {
-  workspace: WorkspaceV1;
-  preferences: PreferencesV1;
+  workspace: WorkspaceV2;
+  preferences: PreferencesV2;
   initialWorkspaceRevision: number;
   initialPreferencesRevision: number;
   hydrated: boolean;
-  onRemoteWorkspace: (workspace: WorkspaceV1) => void;
-  onRemotePreferences: (preferences: PreferencesV1) => void;
+  onRemoteWorkspace: (workspace: WorkspaceV2) => void;
+  onRemotePreferences: (preferences: PreferencesV2) => void;
 }
 
 function createProps(overrides: Partial<HookProps> = {}): HookProps {
@@ -95,11 +96,11 @@ describe("useDomainPersistence", () => {
     expect(localStorage.getItem(STORAGE_KEYS.preferences)).toBeNull();
 
     act(() => { vi.advanceTimersByTime(1); });
-    expect(stored<WorkspaceStorageEnvelopeV1>(STORAGE_KEYS.workspace)).toMatchObject({
+    expect(stored<WorkspaceStorageEnvelopeV2>(STORAGE_KEYS.workspace)).toMatchObject({
       revision: 5,
       workspace
     });
-    expect(stored<PreferencesStorageEnvelopeV1>(STORAGE_KEYS.preferences)).toMatchObject({
+    expect(stored<PreferencesStorageEnvelopeV2>(STORAGE_KEYS.preferences)).toMatchObject({
       revision: 8,
       preferences
     });
@@ -124,7 +125,7 @@ describe("useDomainPersistence", () => {
     rerender({ ...initial, preferences });
     act(() => { vi.advanceTimersByTime(300); });
 
-    expect(stored<PreferencesStorageEnvelopeV1>(STORAGE_KEYS.preferences)).toMatchObject({
+    expect(stored<PreferencesStorageEnvelopeV2>(STORAGE_KEYS.preferences)).toMatchObject({
       revision: 3,
       preferences: {
         toolbar: {
@@ -153,8 +154,8 @@ describe("useDomainPersistence", () => {
 
     act(() => { window.dispatchEvent(new Event("pagehide")); });
 
-    expect(stored<WorkspaceStorageEnvelopeV1>(STORAGE_KEYS.workspace)?.workspace).toEqual(workspace);
-    expect(stored<PreferencesStorageEnvelopeV1>(STORAGE_KEYS.preferences)?.preferences).toEqual(preferences);
+    expect(stored<WorkspaceStorageEnvelopeV2>(STORAGE_KEYS.workspace)?.workspace).toEqual(workspace);
+    expect(stored<PreferencesStorageEnvelopeV2>(STORAGE_KEYS.preferences)?.preferences).toEqual(preferences);
   });
 
   it("adopts a newer clean remote workspace without echo-saving it", () => {
@@ -166,9 +167,9 @@ describe("useDomainPersistence", () => {
     );
     const remoteWorkspace = createDefaultWorkspace("en", "remote-page");
     remoteWorkspace.pages[0] = { ...remoteWorkspace.pages[0], text: "Remote sign" };
-    const envelope: WorkspaceStorageEnvelopeV1 = {
+    const envelope: WorkspaceStorageEnvelopeV2 = {
       format: "simple-white-board/local-workspace",
-      schemaVersion: 1,
+      schemaVersion: SCHEMA_VERSION,
       revision: 1,
       savedAt: "2026-08-12T00:00:00.000Z",
       writerId: "remote-tab",
@@ -177,7 +178,7 @@ describe("useDomainPersistence", () => {
 
     act(() => dispatchStorage(STORAGE_KEYS.workspace, envelope));
     expect(onRemoteWorkspace).toHaveBeenCalledWith(remoteWorkspace);
-    const adoptedWorkspace = onRemoteWorkspace.mock.calls[0][0] as WorkspaceV1;
+    const adoptedWorkspace = onRemoteWorkspace.mock.calls[0][0] as WorkspaceV2;
     rerender({ ...initial, workspace: adoptedWorkspace });
     act(() => { vi.advanceTimersByTime(500); });
 
@@ -200,9 +201,9 @@ describe("useDomainPersistence", () => {
       { initialProps: initial }
     );
     const remoteWorkspace = createDefaultWorkspace("en", "other-page");
-    const envelope: WorkspaceStorageEnvelopeV1 = {
+    const envelope: WorkspaceStorageEnvelopeV2 = {
       format: "simple-white-board/local-workspace",
-      schemaVersion: 1,
+      schemaVersion: SCHEMA_VERSION,
       revision: 3,
       savedAt: "2026-08-12T00:00:00.000Z",
       writerId: "remote-tab",
@@ -272,8 +273,8 @@ describe("useDomainPersistence", () => {
     });
     act(() => { vi.advanceTimersByTime(300); });
 
-    expect(stored<WorkspaceStorageEnvelopeV1>(STORAGE_KEYS.workspace)?.revision).toBe(9);
-    expect(stored<PreferencesStorageEnvelopeV1>(STORAGE_KEYS.preferences)?.revision).toBe(11);
+    expect(stored<WorkspaceStorageEnvelopeV2>(STORAGE_KEYS.workspace)?.revision).toBe(9);
+    expect(stored<PreferencesStorageEnvelopeV2>(STORAGE_KEYS.preferences)?.revision).toBe(11);
   });
 
   it("enters memory mode after a workspace write fails and retries only after a successful replacement", () => {
@@ -326,8 +327,8 @@ describe("useDomainPersistence", () => {
     expect(result.current.persistenceEnabled).toBe(true);
     expect(result.current.saveFailed).toBe(false);
 
-    const adoptedWorkspace = (initial.onRemoteWorkspace as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as WorkspaceV1;
-    const adoptedPreferences = (initial.onRemotePreferences as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as PreferencesV1;
+    const adoptedWorkspace = (initial.onRemoteWorkspace as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as WorkspaceV2;
+    const adoptedPreferences = (initial.onRemotePreferences as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as PreferencesV2;
     rerender({
       ...initial,
       workspace: adoptedWorkspace,
@@ -345,7 +346,7 @@ describe("useDomainPersistence", () => {
     act(() => {
       vi.advanceTimersByTime(300);
     });
-    expect(stored<WorkspaceStorageEnvelopeV1>(STORAGE_KEYS.workspace)?.workspace).toEqual(recoveredChange);
+    expect(stored<WorkspaceStorageEnvelopeV2>(STORAGE_KEYS.workspace)?.workspace).toEqual(recoveredChange);
   });
 
   it("enters memory mode after a preference write fails and does not retry later changes", () => {

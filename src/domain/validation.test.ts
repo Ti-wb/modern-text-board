@@ -15,7 +15,7 @@ import {
 } from "./validation";
 
 describe("domain validation", () => {
-  it("accepts a complete v1 export", () => {
+  it("accepts a complete current export", () => {
     const data = createExport(
       createDefaultWorkspace("zh-TW", "page-1"),
       createDefaultPreferences("zh-TW"),
@@ -23,6 +23,30 @@ describe("domain validation", () => {
     );
     expect(validateExport(data)).toEqual({ success: true, data });
     expect(parseExportJson(serializeExport(data))).toMatchObject({ success: true });
+  });
+
+  it("migrates a schema v1 export to responsive schema v2 without changing pixels", () => {
+    const current = createExport(
+      createDefaultWorkspace("en", "legacy-page"),
+      createDefaultPreferences("en"),
+      new Date("2026-08-12T00:00:00.000Z"),
+    );
+    const legacy = JSON.parse(JSON.stringify(current)) as Record<string, unknown>;
+    legacy.schemaVersion = 1;
+    const legacyWorkspace = legacy.workspace as {
+      pages: Array<Record<string, unknown>>;
+    };
+    delete legacyWorkspace.pages[0].fontScalePercent;
+
+    expect(parseExportJson(JSON.stringify(legacy))).toMatchObject({
+      success: true,
+      data: {
+        schemaVersion: 2,
+        workspace: {
+          pages: [{ maxFontSizePx: 80, fontScalePercent: null }],
+        },
+      },
+    });
   });
 
   it("rejects unknown fields at every object level", () => {
@@ -103,6 +127,34 @@ describe("domain validation", () => {
     const workspace = createDefaultWorkspace("en", "page-1");
     workspace.pages[0].maxFontSizePx = 201;
     expect(validateWorkspace(workspace)).toMatchObject({ success: false });
+
+    const responsive = createDefaultWorkspace("en", "responsive-page");
+    responsive.pages[0].fontScalePercent = LIMITS.maxFontScalePercent + 1;
+    expect(validateWorkspace(responsive)).toMatchObject({ success: false });
+    responsive.pages[0].fontScalePercent = LIMITS.minFontScalePercent;
+    expect(validateWorkspace(responsive)).toMatchObject({ success: true });
+  });
+
+  it("normalizes legacy pages without a responsive font scale", () => {
+    const workspace = createDefaultWorkspace("en", "legacy-page");
+    const legacyPage = { ...workspace.pages[0] } as Record<string, unknown>;
+    delete legacyPage.fontScalePercent;
+
+    expect(
+      validateWorkspace({ pages: [legacyPage], activePageId: "legacy-page" }),
+    ).toMatchObject({
+      success: true,
+      data: { pages: [{ maxFontSizePx: 80, fontScalePercent: null }] },
+    });
+  });
+
+  it("accepts fractional marquee speeds across the expanded range", () => {
+    const workspace = createDefaultWorkspace("en", "marquee-page");
+    workspace.pages[0].marquee.speed = 12.3;
+    expect(validateWorkspace(workspace)).toMatchObject({ success: true });
+
+    workspace.pages[0].marquee.speed = LIMITS.maxMarqueeSpeed + 0.1;
+    expect(validateWorkspace(workspace)).toMatchObject({ success: false });
   });
 
   it("validates the toolbar vertical ratio", () => {
@@ -162,7 +214,7 @@ describe("domain validation", () => {
       error: { code: "invalid_format" },
     });
     expect(
-      parseExportJson('{"format":"simple-white-board","schemaVersion":2}'),
+      parseExportJson('{"format":"simple-white-board","schemaVersion":3}'),
     ).toMatchObject({
       success: false,
       error: { code: "unsupported_version" },

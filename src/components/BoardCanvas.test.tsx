@@ -143,7 +143,7 @@ describe("BoardCanvas", () => {
     expect(verticalMeasure?.style.width).not.toBe("max-content");
   });
 
-  it("does not reschedule fitting after applying its own marquee geometry", () => {
+  it("settles fitting after the follow-up layout measurement without looping", () => {
     const frames: FrameRequestCallback[] = [];
     const requestFrame = vi
       .spyOn(globalThis, "requestAnimationFrame")
@@ -162,6 +162,11 @@ describe("BoardCanvas", () => {
       initialFrames.forEach((callback) => callback(performance.now()));
     });
 
+    expect(frames).toHaveLength(1);
+    act(() => {
+      const followUpFrames = frames.splice(0);
+      followUpFrames.forEach((callback) => callback(performance.now()));
+    });
     expect(frames).toHaveLength(0);
     view.unmount();
     requestFrame.mockRestore();

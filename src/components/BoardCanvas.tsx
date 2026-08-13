@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import type { BoardPageV1 } from "../domain/types";
+import { useEffect, useMemo, useRef } from "preact/hooks";
+import type { BoardPageV2 } from "../domain/types";
 import { useAutoFit } from "../hooks/useAutoFit";
+import { useMarqueeMotion } from "../hooks/useMarqueeMotion";
 import { QrDisplay } from "./QrDisplay";
 
 interface BoardCanvasProps {
-  page: BoardPageV1;
+  page: BoardPageV2;
   placeholder: string;
   editHint: string;
   qrError: string;
@@ -14,10 +15,15 @@ interface BoardCanvasProps {
   onNext: () => void;
   onPrevious: () => void;
   onInteraction: () => void;
-  onFitChange: (size: number, overflow: boolean) => void;
+  onFitChange: (
+    size: number,
+    overflow: boolean,
+    maxFittingSize: number,
+    fillReferenceSize: number,
+  ) => void;
 }
 
-const fontClasses: Record<BoardPageV1["fontFamily"], string> = {
+const fontClasses: Record<BoardPageV2["fontFamily"], string> = {
   "system-sans": "font-system-sans",
   "system-rounded": "font-system-rounded",
   "system-serif": "font-system-serif",
@@ -40,16 +46,9 @@ export function BoardCanvas({
   const textViewportRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLSpanElement>(null);
   const movingRef = useRef<HTMLDivElement>(null);
+  const marqueeCopyRef = useRef<HTMLDivElement>(null);
   const pointerStartRef = useRef<{ x: number; y: number; at: number } | null>(null);
   const lastTapRef = useRef<{ x: number; y: number; at: number } | null>(null);
-  const [motion, setMotion] = useState({
-    startX: "0px",
-    startY: "0px",
-    endX: "0px",
-    endY: "0px",
-    duration: 8
-  });
-
   const displayText = page.text || placeholder;
   const horizontalMarquee = page.marquee.enabled &&
     (page.marquee.direction === "left" || page.marquee.direction === "right");
@@ -57,75 +56,33 @@ export function BoardCanvas({
   const mode = !page.marquee.enabled
     ? "static"
     : horizontalMarquee ? "horizontal" : "vertical";
-  const { fontSize, overflow } = useAutoFit({
+  const { fillReferenceSize, fontSize, maxFittingSize, overflow } = useAutoFit({
     containerRef: textViewportRef,
     measureRef,
     content: displayText,
     maxSize: page.maxFontSizePx,
+    scalePercent: page.fontScalePercent,
     mode,
+    resizeKey: String(page.qr.enabled && Boolean(page.qr.payload)),
     layoutKey: `${page.fontFamily}:${page.fontWeight}:${page.qr.enabled}`
   });
 
-  useEffect(() => onFitChange(fontSize, overflow), [fontSize, overflow, onFitChange]);
+  useEffect(
+    () => onFitChange(fontSize, overflow, maxFittingSize, fillReferenceSize),
+    [fillReferenceSize, fontSize, maxFittingSize, overflow, onFitChange],
+  );
 
-  useEffect(() => {
-    const viewport = textViewportRef.current;
-    const moving = movingRef.current;
-    if (!viewport || !moving || !page.marquee.enabled) return;
-
-    const update = () => {
-      const viewportRect = viewport.getBoundingClientRect();
-      const contentRect = moving.getBoundingClientRect();
-      const pixelsPerSecond = 24 + ((page.marquee.speed - 1) / 9) * 136;
-      let startX = 0;
-      let startY = 0;
-      let endX = 0;
-      let endY = 0;
-      let distance: number;
-      if (page.marquee.direction === "left") {
-        startX = viewportRect.width;
-        endX = -contentRect.width;
-        distance = viewportRect.width + contentRect.width;
-      } else if (page.marquee.direction === "right") {
-        startX = -contentRect.width;
-        endX = viewportRect.width;
-        distance = viewportRect.width + contentRect.width;
-      } else if (page.marquee.direction === "up") {
-        startY = viewportRect.height;
-        endY = -contentRect.height;
-        distance = viewportRect.height + contentRect.height;
-      } else {
-        startY = -contentRect.height;
-        endY = viewportRect.height;
-        distance = viewportRect.height + contentRect.height;
-      }
-      const nextMotion = {
-        startX: `${startX}px`,
-        startY: `${startY}px`,
-        endX: `${endX}px`,
-        endY: `${endY}px`,
-        duration: Math.max(1.5, distance / pixelsPerSecond)
-      };
-      setMotion((current) =>
-        current.startX === nextMotion.startX &&
-        current.startY === nextMotion.startY &&
-        current.endX === nextMotion.endX &&
-        current.endY === nextMotion.endY &&
-        current.duration === nextMotion.duration
-          ? current
-          : nextMotion
-      );
-    };
-
-    const observer = new ResizeObserver(update);
-    observer.observe(viewport);
-    observer.observe(moving);
-    const frame = requestAnimationFrame(update);
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-    };
-  }, [fontSize, page.marquee.direction, page.marquee.enabled, page.marquee.speed]);
+  useMarqueeMotion({
+    animationKey: page.id,
+    direction: page.marquee.direction,
+    enabled: page.marquee.enabled,
+    fontSize,
+    copyRef: marqueeCopyRef,
+    movingRef,
+    paused,
+    speed: page.marquee.speed,
+    viewportRef: textViewportRef,
+  });
 
   const textColor = page.textColor === "auto" ? (page.theme === "dark" ? "#ffffff" : "#1a1a1e") : page.textColor;
   const textStyle = useMemo(
@@ -136,13 +93,8 @@ export function BoardCanvas({
       textAlign: page.textAlign,
       width: verticalMarquee ? "100%" : undefined,
       maxWidth: verticalMarquee ? "100%" : undefined,
-      "--marquee-start-x": motion.startX,
-      "--marquee-start-y": motion.startY,
-      "--marquee-end-x": motion.endX,
-      "--marquee-end-y": motion.endY,
-      "--marquee-duration": `${motion.duration}s`
     }),
-    [fontSize, motion, page.fontWeight, page.textAlign, textColor, verticalMarquee]
+    [fontSize, page.fontWeight, page.textAlign, textColor, verticalMarquee]
   );
 
   const isInteractiveTarget = (target: EventTarget | null) =>
@@ -205,17 +157,26 @@ export function BoardCanvas({
             {displayText}
           </span>
           <div
-            class={`moving-text ${page.marquee.enabled ? "is-marquee" : ""} ${paused ? "is-paused" : ""}`}
+            class={`moving-text ${page.marquee.enabled ? `is-marquee marquee-${horizontalMarquee ? "horizontal" : "vertical"}` : ""} ${paused ? "is-paused" : ""}`}
             ref={movingRef}
             style={textStyle}
           >
-            <div class={`${page.flashEnabled ? "is-flashing" : ""} ${paused ? "is-paused" : ""}`}>
-              <div class={page.mirrored ? "is-mirrored" : ""}>
-                <p class={`display-text ${fontClasses[page.fontFamily]} ${horizontalMarquee ? "no-wrap" : ""}`}>
-                  {displayText}
-                </p>
+            {(page.marquee.enabled ? [0, 1, 2] : [1]).map((copyIndex) => (
+              <div
+                aria-hidden={page.marquee.enabled && copyIndex !== 1}
+                class={page.marquee.enabled ? "marquee-copy" : undefined}
+                key={copyIndex}
+                ref={page.marquee.enabled && copyIndex === 1 ? marqueeCopyRef : undefined}
+              >
+                <div class={`${page.flashEnabled ? "is-flashing" : ""} ${paused ? "is-paused" : ""}`}>
+                  <div class={page.mirrored ? "is-mirrored" : ""}>
+                    <p class={`display-text ${fontClasses[page.fontFamily]} ${horizontalMarquee ? "no-wrap" : ""}`}>
+                      {displayText}
+                    </p>
+                  </div>
+                </div>
               </div>
-            </div>
+            ))}
           </div>
         </div>
         {page.qr.enabled && page.qr.payload ? <QrDisplay errorLabel={qrError} payload={page.qr.payload} /> : null}

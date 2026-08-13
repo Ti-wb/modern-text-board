@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { LIMITS, createDefaultPage, createDefaultPreferences } from "./defaults";
 import { preferencesReducer, workspaceReducer } from "./reducer";
-import type { BoardPageV1, WorkspaceV1 } from "./types";
+import type { BoardPageV2, WorkspaceV2 } from "./types";
 
-function workspace(...pages: BoardPageV1[]): WorkspaceV1 {
+function workspace(...pages: BoardPageV2[]): WorkspaceV2 {
   return { pages, activePageId: pages[0].id };
 }
 
@@ -45,7 +45,7 @@ describe("workspaceReducer page management", () => {
       createDefaultPage("two", "Two"),
       createDefaultPage("three", "Three"),
     ];
-    let state: WorkspaceV1 = { pages, activePageId: "two" };
+    let state: WorkspaceV2 = { pages, activePageId: "two" };
     state = workspaceReducer(state, { type: "page/delete", pageId: "two" });
     expect(state.activePageId).toBe("three");
 
@@ -62,7 +62,7 @@ describe("workspaceReducer page management", () => {
       createDefaultPage("two", "Two"),
       createDefaultPage("three", "Three"),
     ];
-    const state: WorkspaceV1 = { pages, activePageId: "two" };
+    const state: WorkspaceV2 = { pages, activePageId: "two" };
     const result = workspaceReducer(state, {
       type: "page/move",
       pageId: "two",
@@ -141,6 +141,53 @@ describe("workspaceReducer page settings", () => {
     expect(state.pages[0].fontWeight).toBe(400);
     state = workspaceReducer(state, { type: "page/toggle-bold", pageId: "one" });
     expect(state.pages[0].fontWeight).toBe(700);
+  });
+
+  it("stores fractional marquee speeds and clamps the expanded range", () => {
+    let state = workspace(createDefaultPage("one", "One"));
+    state = workspaceReducer(state, {
+      type: "page/set-marquee-speed",
+      pageId: "one",
+      speed: 12.34,
+    });
+    expect(state.pages[0].marquee.speed).toBe(12.3);
+
+    state = workspaceReducer(state, {
+      type: "page/set-marquee-speed",
+      pageId: "one",
+      speed: 999,
+    });
+    expect(state.pages[0].marquee.speed).toBe(LIMITS.maxMarqueeSpeed);
+    expect(LIMITS.maxMarqueeSpeed).toBeGreaterThan(10);
+  });
+
+  it("uses a clamped responsive fill percentage and keeps pixel sizing as a legacy fallback", () => {
+    const initial = workspace(createDefaultPage("one", "One"));
+    const responsive = workspaceReducer(initial, {
+      type: "page/set-font-scale",
+      pageId: "one",
+      percent: 999,
+    });
+    expect(responsive.pages[0].fontScalePercent).toBe(
+      LIMITS.maxFontScalePercent,
+    );
+
+    const legacy = workspaceReducer(responsive, {
+      type: "page/set-font-size",
+      pageId: "one",
+      sizePx: 120,
+    });
+    expect(legacy.pages[0]).toMatchObject({
+      fontScalePercent: null,
+      maxFontSizePx: 120,
+    });
+    expect(
+      workspaceReducer(legacy, {
+        type: "page/set-font-scale",
+        pageId: "one",
+        percent: Number.NaN,
+      }),
+    ).toBe(legacy);
   });
 
   it("allows marquee and flash to play together in every direction", () => {

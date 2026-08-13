@@ -1,10 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/preact";
+import { cleanup, fireEvent, render, screen } from "@testing-library/preact";
 import { describe, expect, it, vi } from "vitest";
 import { TextEditor } from "./TextEditor";
 
 function renderEditor(overrides = {}) {
   const props = {
     effectiveFontSizePx: 72,
+    fontScalePercent: null,
     fitOverflow: false,
     locale: "en" as const,
     maxCodePoints: 2_000,
@@ -19,6 +20,16 @@ function renderEditor(overrides = {}) {
 }
 
 describe("TextEditor", () => {
+  it("describes legacy and responsive font sizing accurately", () => {
+    const legacy = renderEditor();
+    expect(screen.getByText("Previous setting 80px / shown 72px")).toBeDefined();
+    legacy.onCancel.mockClear();
+
+    cleanup();
+    renderEditor({ fontScalePercent: 100, effectiveFontSizePx: 536 });
+    expect(screen.getByText("Fill 100% / shown 536px")).toBeDefined();
+  });
+
   it("keeps edits in a draft until Apply is pressed", () => {
     const props = renderEditor();
     const textarea = screen.getByRole("textbox", { name: "Edit text" });

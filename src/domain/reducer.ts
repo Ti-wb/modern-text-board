@@ -6,11 +6,11 @@ import {
   utf8ByteLength,
 } from "./defaults";
 import type {
-  BoardPageV1,
+  BoardPageV2,
   PreferencesAction,
-  PreferencesV1,
+  PreferencesV2,
   WorkspaceAction,
-  WorkspaceV1,
+  WorkspaceV2,
 } from "./types";
 
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
@@ -28,10 +28,10 @@ function normalizePageName(name: string): string | null {
 }
 
 function replacePage(
-  workspace: WorkspaceV1,
+  workspace: WorkspaceV2,
   pageId: string,
-  update: (page: BoardPageV1) => BoardPageV1,
-): WorkspaceV1 {
+  update: (page: BoardPageV2) => BoardPageV2,
+): WorkspaceV2 {
   const index = workspace.pages.findIndex((page) => page.id === pageId);
   if (index < 0) return workspace;
 
@@ -44,7 +44,7 @@ function replacePage(
   return { ...workspace, pages };
 }
 
-function movePage(workspace: WorkspaceV1, pageId: string, toIndex: number): WorkspaceV1 {
+function movePage(workspace: WorkspaceV2, pageId: string, toIndex: number): WorkspaceV2 {
   const fromIndex = workspace.pages.findIndex((page) => page.id === pageId);
   if (fromIndex < 0 || !Number.isFinite(toIndex)) return workspace;
 
@@ -57,7 +57,7 @@ function movePage(workspace: WorkspaceV1, pageId: string, toIndex: number): Work
   return { ...workspace, pages };
 }
 
-function isBasicWorkspaceInvariant(workspace: WorkspaceV1): boolean {
+function isBasicWorkspaceInvariant(workspace: WorkspaceV2): boolean {
   if (
     workspace.pages.length < 1 ||
     workspace.pages.length > LIMITS.maxPages ||
@@ -75,9 +75,9 @@ function isBasicWorkspaceInvariant(workspace: WorkspaceV1): boolean {
 }
 
 export function workspaceReducer(
-  workspace: WorkspaceV1,
+  workspace: WorkspaceV2,
   action: WorkspaceAction,
-): WorkspaceV1 {
+): WorkspaceV2 {
   switch (action.type) {
     case "workspace/replace":
       return isBasicWorkspaceInvariant(action.workspace) ? action.workspace : workspace;
@@ -115,7 +115,7 @@ export function workspaceReducer(
         return workspace;
       }
 
-      const copy: BoardPageV1 = {
+      const copy: BoardPageV2 = {
         ...source,
         id: action.id,
         name,
@@ -206,7 +206,23 @@ export function workspaceReducer(
         LIMITS.maxFontSizePx,
       );
       return replacePage(workspace, action.pageId, (page) =>
-        page.maxFontSizePx === maxFontSizePx ? page : { ...page, maxFontSizePx },
+        page.maxFontSizePx === maxFontSizePx && page.fontScalePercent === null
+          ? page
+          : { ...page, maxFontSizePx, fontScalePercent: null },
+      );
+    }
+
+    case "page/set-font-scale": {
+      if (!Number.isFinite(action.percent)) return workspace;
+      const fontScalePercent = clamp(
+        Math.round(action.percent),
+        LIMITS.minFontScalePercent,
+        LIMITS.maxFontScalePercent,
+      );
+      return replacePage(workspace, action.pageId, (page) =>
+        page.fontScalePercent === fontScalePercent
+          ? page
+          : { ...page, fontScalePercent },
       );
     }
 
@@ -250,7 +266,7 @@ export function workspaceReducer(
     case "page/set-marquee-speed": {
       if (!Number.isFinite(action.speed)) return workspace;
       const speed = clamp(
-        Math.round(action.speed),
+        Math.round(action.speed / LIMITS.marqueeSpeedStep) * LIMITS.marqueeSpeedStep,
         LIMITS.minMarqueeSpeed,
         LIMITS.maxMarqueeSpeed,
       );
@@ -312,9 +328,9 @@ export function workspaceReducer(
 }
 
 export function preferencesReducer(
-  preferences: PreferencesV1,
+  preferences: PreferencesV2,
   action: PreferencesAction,
-): PreferencesV1 {
+): PreferencesV2 {
   switch (action.type) {
     case "preferences/replace":
       return action.preferences;
@@ -369,7 +385,7 @@ export function preferencesReducer(
   }
 }
 
-export function getActivePage(workspace: WorkspaceV1): BoardPageV1 {
+export function getActivePage(workspace: WorkspaceV2): BoardPageV2 {
   return (
     workspace.pages.find((page) => page.id === workspace.activePageId) ??
     workspace.pages[0]

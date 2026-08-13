@@ -212,13 +212,38 @@ html[data-presentation="true"] .save-indicator {
   max-width: 100%;
   line-height: 1.06;
   transform: translate(0, 0);
-  will-change: transform;
+  transition: font-size 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .moving-text.is-marquee {
+  display: flex;
+  align-items: center;
+  gap: var(--marquee-copy-gap, 50%);
   width: max-content;
   max-width: none;
-  animation: marquee-motion var(--marquee-duration) linear infinite;
+  will-change: transform;
+}
+
+.moving-text.marquee-horizontal {
+  flex-direction: row;
+}
+
+.moving-text.marquee-vertical {
+  flex-direction: column;
+  width: 100%;
+  max-width: 100%;
+}
+
+.marquee-copy {
+  flex: 0 0 auto;
+}
+
+.marquee-vertical .marquee-copy {
+  width: 100%;
+}
+
+.moving-text.is-marquee.uses-css-marquee {
+  animation: marquee-motion var(--marquee-fallback-duration) linear infinite;
 }
 
 .moving-text.is-paused,
@@ -725,6 +750,7 @@ html[data-presentation="true"] .save-indicator {
   color: #fff;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 input[type="range"] {
@@ -1268,6 +1294,7 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   .board,
+  .moving-text,
   .toolbar-shell,
   .switch,
   .switch::before,

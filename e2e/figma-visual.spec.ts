@@ -97,7 +97,25 @@ test("matches the five primary Figma-derived 1024x768 states", async ({ page }) 
   await expect(page.getByRole("dialog", { name: /跑馬燈|Marquee/ })).toBeVisible();
   await page.getByRole("button", { name: /啟用跑馬燈|Enable marquee/ }).click();
   await expect(page.locator(".moving-text")).toHaveClass(/is-marquee/);
+  await page.waitForFunction(
+    () => document.querySelector(".moving-text")?.getAnimations().length === 1,
+  );
+  await page.locator(".moving-text").evaluate((moving) => {
+    const animation = moving.getAnimations()[0];
+    const duration = Number(animation?.effect?.getTiming().duration);
+    if (!animation || !Number.isFinite(duration)) throw new Error("Marquee animation is unavailable");
+    animation.pause();
+    animation.currentTime = duration * 0.5;
+    const frozenTransform = getComputedStyle(moving).transform;
+    animation.cancel();
+    moving.style.transform = frozenTransform;
+    moving.style.willChange = "auto";
+  });
   await captureState(page, "04-marquee-panel.png");
+  await page.locator(".moving-text").evaluate((moving) => {
+    moving.style.removeProperty("transform");
+    moving.style.removeProperty("will-change");
+  });
 
   await page.getByRole("button", { name: /關閉|Close/ }).click();
   await page.getByRole("button", { name: /更多工具|More tools/ }).click();

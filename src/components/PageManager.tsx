@@ -3,12 +3,12 @@ import type { DragEvent } from "preact/compat";
 import { useEffect, useRef, useState } from "preact/hooks";
 
 import { codePointLength } from "../domain/defaults";
-import type { BoardPageV1, Locale } from "../domain/types";
+import type { BoardPageV2, Locale } from "../domain/types";
 import { getTranslator } from "../i18n";
 import { Icon } from "./Icon";
 
 export interface PageManagerProps {
-  pages: BoardPageV1[];
+  pages: BoardPageV2[];
   activePageId: string;
   locale: Locale;
   maxPages: number;

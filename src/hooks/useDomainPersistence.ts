@@ -10,11 +10,11 @@ import {
   type ImportCommitResult
 } from "../domain/storage";
 import type {
-  ExportV1,
-  PreferencesStorageEnvelopeV1,
-  PreferencesV1,
-  WorkspaceStorageEnvelopeV1,
-  WorkspaceV1
+  ExportV2,
+  PreferencesStorageEnvelopeV2,
+  PreferencesV2,
+  WorkspaceStorageEnvelopeV2,
+  WorkspaceV2
 } from "../domain/types";
 import {
   parseStoredJson,
@@ -23,13 +23,13 @@ import {
 } from "../domain/validation";
 
 interface PersistenceOptions {
-  workspace: WorkspaceV1;
-  preferences: PreferencesV1;
+  workspace: WorkspaceV2;
+  preferences: PreferencesV2;
   initialWorkspaceRevision: number;
   initialPreferencesRevision: number;
   hydrated: boolean;
-  onRemoteWorkspace: (workspace: WorkspaceV1) => void;
-  onRemotePreferences: (preferences: PreferencesV1) => void;
+  onRemoteWorkspace: (workspace: WorkspaceV2) => void;
+  onRemotePreferences: (preferences: PreferencesV2) => void;
 }
 
 const DELAY_MS = 300;
@@ -54,10 +54,10 @@ export function useDomainPersistence({
   const preferencesDirtyRef = useRef(false);
   const workspaceTimerRef = useRef<number | null>(null);
   const preferencesTimerRef = useRef<number | null>(null);
-  const suppressWorkspaceRef = useRef<WorkspaceV1 | null>(null);
-  const suppressPreferencesRef = useRef<PreferencesV1 | null>(null);
-  const workspaceConflictRef = useRef<WorkspaceStorageEnvelopeV1 | null>(null);
-  const preferencesConflictRef = useRef<PreferencesStorageEnvelopeV1 | null>(null);
+  const suppressWorkspaceRef = useRef<WorkspaceV2 | null>(null);
+  const suppressPreferencesRef = useRef<PreferencesV2 | null>(null);
+  const workspaceConflictRef = useRef<WorkspaceStorageEnvelopeV2 | null>(null);
+  const preferencesConflictRef = useRef<PreferencesStorageEnvelopeV2 | null>(null);
   const remoteWorkspaceCallbackRef = useRef(onRemoteWorkspace);
   const remotePreferencesCallbackRef = useRef(onRemotePreferences);
   const enabledRef = useRef(hydrated);
@@ -182,7 +182,7 @@ export function useDomainPersistence({
   useEffect(() => {
     if (!persistenceEnabled) return;
 
-    const applyRemoteWorkspace = (envelope: WorkspaceStorageEnvelopeV1) => {
+    const applyRemoteWorkspace = (envelope: WorkspaceStorageEnvelopeV2) => {
       workspaceRevisionRef.current = envelope.revision;
       workspaceDirtyRef.current = false;
       workspaceBaselineRef.current = envelope.workspace;
@@ -190,7 +190,7 @@ export function useDomainPersistence({
       setWorkspaceStatus({ status: "saved", dirty: false, revision: envelope.revision });
       remoteWorkspaceCallbackRef.current(envelope.workspace);
     };
-    const applyRemotePreferences = (envelope: PreferencesStorageEnvelopeV1) => {
+    const applyRemotePreferences = (envelope: PreferencesStorageEnvelopeV2) => {
       preferencesRevisionRef.current = envelope.revision;
       preferencesDirtyRef.current = false;
       preferencesBaselineRef.current = envelope.preferences;
@@ -294,7 +294,7 @@ export function useDomainPersistence({
     });
   }, [flushPreferences, flushWorkspace]);
 
-  const commitReplacement = useCallback((data: ExportV1): ImportCommitResult => {
+  const commitReplacement = useCallback((data: ExportV2): ImportCommitResult => {
     if (workspaceTimerRef.current !== null) window.clearTimeout(workspaceTimerRef.current);
     if (preferencesTimerRef.current !== null) window.clearTimeout(preferencesTimerRef.current);
     const result = commitImport(data, {

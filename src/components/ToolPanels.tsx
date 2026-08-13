@@ -1,5 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef } from "preact/hooks";
+import { LIMITS, clamp } from "../domain/defaults";
+import { speedToPixelsPerSecond } from "../hooks/useMarqueeMotion";
 import type {
   FontFamily,
   FontWeight,
@@ -13,12 +15,15 @@ import type { ToolPanelKind } from "./Toolbar";
 
 export interface FontPanelControls {
   fontFamily: FontFamily;
-  maxFontSizePx: number;
+  fontScalePercent: number | null;
+  legacyMaxFontSizePx: number;
+  fillReferenceFontSizePx: number;
+  maxFittingFontSizePx: number;
   effectiveFontSizePx: number;
   fontWeight: FontWeight;
   fitOverflow: boolean;
   onFontFamilyChange: (fontFamily: FontFamily) => void;
-  onFontSizeChange: (sizePx: number) => void;
+  onFontScaleChange: (percent: number) => void;
   onFontWeightChange: (fontWeight: FontWeight) => void;
 }
 
@@ -78,8 +83,8 @@ const COPY = {
     close: "關閉",
     fontTitle: "字型與字級",
     fontFamily: "系統字型",
-    fontSize: "字級上限",
-    configured: "設定值",
+    fontSize: "畫面填滿程度",
+    configured: "填滿",
     effective: "實際顯示",
     overflow: "即使縮至 24 px 仍無法完整顯示，建議精簡文字。",
     fontWeight: "字重",
@@ -113,7 +118,8 @@ const COPY = {
     directionUp: "向上",
     directionDown: "向下",
     speed: "速度",
-    speedValue: (speed: number) => `${speed} / 10`,
+    speedValue: (speed: number) => `${Math.round(speedToPixelsPerSecond(speed))} px/s`,
+    speedAria: (speed: number) => `每秒 ${Math.round(speedToPixelsPerSecond(speed))} 像素`,
     animationNote: "跑馬燈可與閃爍同時播放；可在設定暫停所有動態。",
     moreTitle: "更多工具",
     mirror: "鏡像文字",
@@ -137,8 +143,8 @@ const COPY = {
     close: "Close",
     fontTitle: "Font & size",
     fontFamily: "System font",
-    fontSize: "Maximum size",
-    configured: "Set",
+    fontSize: "Screen fill",
+    configured: "Fill",
     effective: "Displayed",
     overflow: "The text still does not fit at 24 px. Try shortening it.",
     fontWeight: "Weight",
@@ -172,7 +178,8 @@ const COPY = {
     directionUp: "Up",
     directionDown: "Down",
     speed: "Speed",
-    speedValue: (speed: number) => `${speed} / 10`,
+    speedValue: (speed: number) => `${Math.round(speedToPixelsPerSecond(speed))} px/s`,
+    speedAria: (speed: number) => `${Math.round(speedToPixelsPerSecond(speed))} pixels per second`,
     animationNote: "Marquee and flash can play together. Pause all motion in Settings.",
     moreTitle: "More tools",
     mirror: "Mirror text",
@@ -311,6 +318,17 @@ function PanelFrame({
 }
 
 function FontPanel({ controls, copy }: { controls: FontPanelControls; copy: Copy }) {
+  const derivedPercent = clamp(
+    Math.round(
+      (controls.legacyMaxFontSizePx /
+        Math.max(1, controls.fillReferenceFontSizePx)) *
+        100,
+    ),
+    LIMITS.minFontScalePercent,
+    LIMITS.maxFontScalePercent,
+  );
+  const scalePercent = controls.fontScalePercent ?? derivedPercent;
+
   return (
     <>
       <span class="section-label">{copy.fontFamily}</span>
@@ -338,23 +356,24 @@ function FontPanel({ controls, copy }: { controls: FontPanelControls; copy: Copy
       <div class="range-block">
         <label class="range-label" for="font-size-range">
           <span>{copy.fontSize}</span>
-          <output>{controls.maxFontSizePx} px</output>
+          <output aria-hidden="true">{scalePercent}%</output>
         </label>
         <input
-          aria-valuemax={200}
-          aria-valuemin={24}
-          aria-valuenow={controls.maxFontSizePx}
+          aria-valuemax={LIMITS.maxFontScalePercent}
+          aria-valuemin={LIMITS.minFontScalePercent}
+          aria-valuenow={scalePercent}
+          aria-valuetext={`${scalePercent}% · ${controls.effectiveFontSizePx} px`}
           id="font-size-range"
-          max="200"
-          min="24"
-          onInput={(event) => controls.onFontSizeChange(Number(event.currentTarget.value))}
+          max={LIMITS.maxFontScalePercent}
+          min={LIMITS.minFontScalePercent}
+          onInput={(event) => controls.onFontScaleChange(Number(event.currentTarget.value))}
           step="1"
           style="min-height: 44px"
           type="range"
-          value={controls.maxFontSizePx}
+          value={scalePercent}
         />
         <div class="panel-row">
-          <span class="menu-value">{copy.configured}: {controls.maxFontSizePx} px</span>
+          <span class="menu-value">{copy.configured}: {scalePercent}%</span>
           <span class="menu-value">{copy.effective}: {controls.effectiveFontSizePx} px</span>
         </div>
         {controls.fitOverflow && <p class="warning-text" role="status">{copy.overflow}</p>}
@@ -532,19 +551,20 @@ function MarqueePanel({ controls, copy }: { controls: MarqueePanelControls; copy
       <div class="range-block" style="margin-top: 14px">
         <label class="range-label" for="marquee-speed-range">
           <span>{copy.speed}</span>
-          <output>{copy.speedValue(controls.speed)}</output>
+          <output aria-hidden="true">{copy.speedValue(controls.speed)}</output>
         </label>
         <div class="range-with-icons">
           <Icon name="turtle" />
           <input
-            aria-valuemax={10}
-            aria-valuemin={1}
+            aria-valuemax={LIMITS.maxMarqueeSpeed}
+            aria-valuemin={LIMITS.minMarqueeSpeed}
             aria-valuenow={controls.speed}
+            aria-valuetext={copy.speedAria(controls.speed)}
             id="marquee-speed-range"
-            max="10"
-            min="1"
+            max={LIMITS.maxMarqueeSpeed}
+            min={LIMITS.minMarqueeSpeed}
             onInput={(event) => controls.onSpeedChange(Number(event.currentTarget.value))}
-            step="1"
+            step={LIMITS.marqueeSpeedStep}
             style="min-height: 44px"
             type="range"
             value={controls.speed}

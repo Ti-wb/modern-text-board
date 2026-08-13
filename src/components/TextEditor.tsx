@@ -10,6 +10,7 @@ export interface TextEditorProps {
   locale: Locale;
   maxCodePoints: number;
   maxFontSizePx: number;
+  fontScalePercent: number | null;
   effectiveFontSizePx: number;
   fitOverflow: boolean;
   onApply: (text: string) => void;
@@ -25,6 +26,7 @@ export function TextEditor({
   locale,
   maxCodePoints,
   maxFontSizePx,
+  fontScalePercent,
   effectiveFontSizePx,
   fitOverflow,
   onApply,
@@ -77,9 +79,13 @@ export function TextEditor({
       <div class="character-count" id="text-editor-count">
         <span>{t("editor.count", { count, limit: maxCodePoints })}</span>
         <span>
-          {locale === "zh-TW"
-            ? `設定 ${maxFontSizePx}px / 顯示 ${effectiveFontSizePx}px`
-            : `Set ${maxFontSizePx}px / shown ${effectiveFontSizePx}px`}
+          {fontScalePercent === null
+            ? locale === "zh-TW"
+              ? `原設定 ${maxFontSizePx}px / 顯示 ${effectiveFontSizePx}px`
+              : `Previous setting ${maxFontSizePx}px / shown ${effectiveFontSizePx}px`
+            : locale === "zh-TW"
+              ? `填滿 ${fontScalePercent}% / 顯示 ${effectiveFontSizePx}px`
+              : `Fill ${fontScalePercent}% / shown ${effectiveFontSizePx}px`}
         </span>
       </div>
       <div aria-live="polite" id="text-editor-warning">

@@ -10,6 +10,13 @@ const TOOLBAR_PROJECTS = new Set([
   CHROMIUM_REGULAR_PROJECT,
   CHROMIUM_COMPACT_PROJECT,
 ]);
+const FONT_FILL_PROJECTS = new Set([
+  CHROMIUM_REGULAR_PROJECT,
+  CHROMIUM_COMPACT_PROJECT,
+  "webkit",
+  "iphone",
+  "ipad-landscape",
+]);
 
 interface Point {
   x: number;
@@ -34,6 +41,13 @@ function skipUnlessToolbarProject(testInfo: TestInfo): void {
   test.skip(
     !TOOLBAR_PROJECTS.has(testInfo.project.name),
     `Runs only in the ${[...TOOLBAR_PROJECTS].join(" and ")} projects`,
+  );
+}
+
+function skipUnlessFontFillProject(testInfo: TestInfo): void {
+  test.skip(
+    !FONT_FILL_PROJECTS.has(testInfo.project.name),
+    `Runs only in the ${[...FONT_FILL_PROJECTS].join(", ")} projects`,
   );
 }
 
@@ -107,6 +121,33 @@ async function dismissPwaBanner(page: Page): Promise<void> {
   if (!await banner.isVisible().catch(() => false)) return;
   const dismiss = banner.getByRole("button").last();
   if (await dismiss.isVisible().catch(() => false)) await dismiss.click();
+}
+
+async function editBoardText(page: Page, text: string): Promise<void> {
+  await page.getByRole("main").dblclick();
+  const editor = page.getByRole("textbox", { name: /編輯文字|Edit text/ });
+  await editor.fill(text);
+  await page.getByRole("button", { name: /套用|Apply/ }).click();
+  await expect(page.locator(".display-text")).toHaveText(text);
+}
+
+async function textFitMetrics(page: Page) {
+  return page.locator(".text-viewport").evaluate((viewport) => {
+    const moving = viewport.querySelector<HTMLElement>(".moving-text");
+    const display = viewport.querySelector<HTMLElement>(".display-text");
+    if (!moving || !display) throw new Error("Displayed text is missing");
+    const viewportBounds = viewport.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(display);
+    const contentBounds = range.getBoundingClientRect();
+    return {
+      contentHeight: contentBounds.height,
+      contentWidth: contentBounds.width,
+      fontSize: Number.parseFloat(getComputedStyle(moving).fontSize),
+      viewportHeight: viewportBounds.height,
+      viewportWidth: viewportBounds.width,
+    };
+  });
 }
 
 async function openSettings(page: Page) {
@@ -201,6 +242,219 @@ test("edits text and keeps the core toolbar operable", async ({ page }) => {
   await page.getByRole("button", { name: /跑馬燈|Marquee/ }).click();
   await page.getByRole("button", { name: /啟用跑馬燈|Enable marquee/ }).click();
   await expect(page.locator(".moving-text")).toHaveClass(/is-marquee/);
+});
+
+test("marquee speed changes continuously without moving the current frame", async ({
+  page,
+}, testInfo) => {
+  skipUnlessProject(testInfo, CHROMIUM_REGULAR_PROJECT);
+  await dismissPwaBanner(page);
+  await editBoardText(page, "Smooth marquee speed control");
+  await page.getByRole("button", { name: /跑馬燈|Marquee/ }).click();
+  const marqueeDialog = page.locator("#tool-panel-marquee");
+  await marqueeDialog
+    .getByRole("button", { name: /啟用跑馬燈|Enable marquee/ })
+    .click();
+
+  const slider = marqueeDialog.getByRole("slider", { name: /速度|Speed/ });
+  await expect(slider).toHaveAttribute("max", "40");
+  await expect(slider).toHaveAttribute("step", "0.1");
+  await page.waitForFunction(
+    () => document.querySelector(".moving-text")?.getAnimations().length === 1,
+  );
+
+  const before = await page.locator(".moving-text").evaluate((moving) => {
+    const animation = moving.getAnimations()[0];
+    const duration = Number(animation.effect?.getTiming().duration);
+    if (!animation || !Number.isFinite(duration)) throw new Error("Marquee animation is unavailable");
+    animation.currentTime = duration * 0.4;
+    const matrix = new DOMMatrixReadOnly(getComputedStyle(moving).transform);
+    (window as typeof window & { __marqueeAnimation?: Animation }).__marqueeAnimation = animation;
+    return { duration, sampledAt: performance.now(), x: matrix.m41, y: matrix.m42 };
+  });
+
+  await slider.fill("37.5");
+  await expect(slider).toHaveValue("37.5");
+
+  const immediatelyAfter = await page.locator(".moving-text").evaluate((moving) => {
+    const animation = moving.getAnimations()[0];
+    const remembered = (window as typeof window & { __marqueeAnimation?: Animation })
+      .__marqueeAnimation;
+    const matrix = new DOMMatrixReadOnly(getComputedStyle(moving).transform);
+    const duration = Number(animation.effect?.getTiming().duration);
+    return {
+      duration,
+      sameAnimation: animation === remembered,
+      sampledAt: performance.now(),
+      x: matrix.m41,
+      y: matrix.m42,
+    };
+  });
+
+  const elapsedSeconds =
+    (immediatelyAfter.sampledAt - before.sampledAt) / 1000;
+  const distanceMoved = Math.hypot(
+    immediatelyAfter.x - before.x,
+    immediatelyAfter.y - before.y,
+  );
+  expect(immediatelyAfter.sameAnimation).toBe(true);
+  expect(immediatelyAfter.duration).toBeCloseTo(before.duration, 5);
+  expect(immediatelyAfter.x).toBeLessThanOrEqual(before.x + 2);
+  expect(distanceMoved).toBeLessThanOrEqual(614 * elapsedSeconds + 8);
+
+  await page.waitForTimeout(200);
+  const finalRate = await page.locator(".moving-text").evaluate((moving) =>
+    moving.getAnimations()[0]?.playbackRate,
+  );
+  expect(finalRate).toBeGreaterThan(5);
+});
+
+test("marquee repeats seamlessly with two copies and a half-screen gap", async ({
+  page,
+}, testInfo) => {
+  skipUnlessProject(testInfo, CHROMIUM_REGULAR_PROJECT);
+  await dismissPwaBanner(page);
+  await editBoardText(page, "Seamless repeat");
+  await page.getByRole("button", { name: /跑馬燈|Marquee/ }).click();
+  await page
+    .locator("#tool-panel-marquee")
+    .getByRole("button", { name: /啟用跑馬燈|Enable marquee/ })
+    .click();
+  await page.waitForFunction(
+    () => document.querySelector(".moving-text")?.getAnimations().length === 1,
+  );
+
+  const samples = await page.locator(".moving-text").evaluate((moving) => {
+    const viewport = moving.closest<HTMLElement>(".text-viewport");
+    const animation = moving.getAnimations()[0];
+    const duration = Number(animation?.effect?.getTiming().duration);
+    if (!viewport || !animation || !Number.isFinite(duration)) {
+      throw new Error("Marquee geometry is unavailable");
+    }
+    animation.pause();
+    const copies = [...moving.querySelectorAll<HTMLElement>(".marquee-copy")];
+    if (copies.length !== 3) throw new Error("Marquee copies are unavailable");
+    const viewportRect = viewport.getBoundingClientRect();
+    const copyWidth = copies[1].getBoundingClientRect().width;
+    const copyGap = Number.parseFloat(
+      getComputedStyle(moving).getPropertyValue("--marquee-copy-gap"),
+    );
+    const cycleDistance = copyWidth + copyGap;
+
+    const sampleAt = (time: number) => {
+      animation.currentTime = time;
+      return copies
+        .map((copy) => {
+          const rect = copy.getBoundingClientRect();
+          return {
+            left: rect.left - viewportRect.left,
+            right: rect.right - viewportRect.left,
+          };
+        })
+        .filter((rect) => rect.right > 0 && rect.left < viewportRect.width)
+        .sort((left, right) => left.left - right.left);
+    };
+
+    return {
+      copyCount: copies.length,
+      copyGap,
+      gapRatio: copyGap / viewportRect.width,
+      viewportWidth: viewportRect.width,
+      beforeReset: sampleAt(duration - 1),
+      overlap: sampleAt(duration * ((copyGap / 2) / cycleDistance)),
+      reset: sampleAt(duration + 1),
+      start: sampleAt(0),
+    };
+  });
+
+  expect(samples.copyCount).toBe(3);
+  expect(samples.gapRatio).toBeCloseTo(0.5, 2);
+  expect(samples.start).toHaveLength(1);
+  expect(samples.overlap).toHaveLength(2);
+  expect(samples.overlap[1].left - samples.overlap[0].right).toBeCloseTo(
+    samples.copyGap,
+    1,
+  );
+  expect(samples.beforeReset).toHaveLength(1);
+  expect(samples.reset).toHaveLength(2);
+  expect(samples.beforeReset[0].left).toBeCloseTo(samples.start[0].left, 0);
+  expect(samples.beforeReset[0].right).toBeCloseTo(samples.start[0].right, 0);
+  expect(samples.reset[0].left).toBeCloseTo(samples.start[0].left, 0);
+  expect(samples.reset[0].right).toBeCloseTo(samples.start[0].right, 0);
+  expect(samples.viewportWidth - samples.reset[1].left).toBeLessThan(2);
+});
+
+test("responsive font fill grows beyond 200px and shrinks at the canvas boundary", async ({
+  page,
+}, testInfo) => {
+  skipUnlessFontFillProject(testInfo);
+  await dismissPwaBanner(page);
+  await editBoardText(page, "A");
+
+  await page.getByRole("button", { name: /字型與字級|Font and size/ }).click();
+  const fontDialog = page.locator("#tool-panel-font");
+  const fillSlider = fontDialog.getByRole("slider", {
+    name: /畫面填滿程度|Screen fill/,
+  });
+  await expect(fillSlider).toHaveAttribute("min", "5");
+  await expect(fillSlider).toHaveAttribute("max", "100");
+  await fillSlider.fill("50");
+  await fontDialog.locator(".panel-close").click();
+  await expect.poll(async () => (await textFitMetrics(page)).fontSize).toBeGreaterThan(200);
+  await page.waitForTimeout(160);
+  const shortHalf = await textFitMetrics(page);
+
+  await editBoardText(page, "AAAA");
+  await expect.poll(async () => (await textFitMetrics(page)).fontSize).toBeLessThanOrEqual(
+    shortHalf.fontSize,
+  );
+  await page.waitForTimeout(160);
+  const longerHalf = await textFitMetrics(page);
+  expect(longerHalf.fontSize).toBeLessThanOrEqual(shortHalf.fontSize);
+
+  await page.getByRole("button", { name: /字型與字級|Font and size/ }).click();
+  await fillSlider.fill("100");
+  await expect(fillSlider).toHaveValue("100");
+  await fontDialog.locator(".panel-close").click();
+
+  await expect.poll(async () => (await textFitMetrics(page)).fontSize).toBeGreaterThan(200);
+  await page.waitForTimeout(160);
+  await expect.poll(async () => {
+    const metrics = await textFitMetrics(page);
+    return Math.min(
+      (metrics.viewportHeight - metrics.contentHeight) / metrics.viewportHeight,
+      (metrics.viewportWidth - metrics.contentWidth) / metrics.viewportWidth,
+    );
+  }).toBeLessThanOrEqual(0.06);
+  const shortText = await textFitMetrics(page);
+  expect(shortText.contentHeight).toBeLessThanOrEqual(shortText.viewportHeight + 2);
+  expect(shortText.contentWidth).toBeLessThanOrEqual(shortText.viewportWidth + 2);
+
+  await editBoardText(
+    page,
+    "這是一段會依照目前畫布寬高自動縮小的長文字 Responsive text",
+  );
+  await expect.poll(async () => (await textFitMetrics(page)).fontSize).toBeLessThan(
+    shortText.fontSize,
+  );
+  await expect.poll(async () => {
+    const metrics = await textFitMetrics(page);
+    return Math.max(
+      metrics.contentHeight - metrics.viewportHeight,
+      metrics.contentWidth - metrics.viewportWidth,
+    );
+  }).toBeLessThanOrEqual(2);
+  const longText = await textFitMetrics(page);
+  expect(longText.fontSize).toBeLessThan(shortText.fontSize);
+  expect(longText.contentHeight).toBeLessThanOrEqual(longText.viewportHeight + 2);
+  expect(longText.contentWidth).toBeLessThanOrEqual(longText.viewportWidth + 2);
+
+  await enableQrCode(page, "responsive-fit-check");
+  await page.waitForTimeout(160);
+  const withQr = await textFitMetrics(page);
+  expect(withQr.fontSize).toBeLessThan(longText.fontSize);
+  expect(withQr.contentHeight).toBeLessThanOrEqual(withQr.viewportHeight + 24);
+  expect(withQr.contentWidth).toBeLessThanOrEqual(withQr.viewportWidth + 24);
 });
 
 test("adds a page and switches with accessible controls", async ({ page }) => {

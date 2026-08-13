@@ -1,7 +1,7 @@
 {
   "name": "modern-text-board",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A lightweight, responsive, offline-ready text board and handheld sign PWA.",
   "license": "GPL-3.0-only",
   "repository": {

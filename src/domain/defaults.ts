@@ -1,11 +1,11 @@
 import type {
-  BoardPageV1,
+  BoardPageV2,
   Locale,
-  PreferencesV1,
-  WorkspaceV1,
+  PreferencesV2,
+  WorkspaceV2,
 } from "./types";
 
-export const SCHEMA_VERSION = 1 as const;
+export const SCHEMA_VERSION = 2 as const;
 
 export const LIMITS = Object.freeze({
   maxPages: 50,
@@ -16,8 +16,12 @@ export const LIMITS = Object.freeze({
   maxImportFileBytes: 1024 * 1024,
   minFontSizePx: 24,
   maxFontSizePx: 200,
+  minFontScalePercent: 5,
+  maxFontScalePercent: 100,
+  maxAutoFitFontSizePx: 4096,
   minMarqueeSpeed: 1,
-  maxMarqueeSpeed: 10,
+  maxMarqueeSpeed: 40,
+  marqueeSpeedStep: 0.1,
 });
 
 export const STORAGE_KEYS = Object.freeze({
@@ -42,7 +46,7 @@ export function createId(): string {
 export function createDefaultPage(
   id = createId(),
   name = DEFAULT_PAGE_NAMES["zh-TW"],
-): BoardPageV1 {
+): BoardPageV2 {
   return {
     id,
     name,
@@ -51,6 +55,7 @@ export function createDefaultPage(
     textColor: "auto",
     fontFamily: "system-sans",
     maxFontSizePx: 80,
+    fontScalePercent: null,
     fontWeight: 900,
     textAlign: "center",
     mirrored: false,
@@ -70,12 +75,12 @@ export function createDefaultPage(
 export function createDefaultWorkspace(
   locale: Locale = "zh-TW",
   id = createId(),
-): WorkspaceV1 {
+): WorkspaceV2 {
   const page = createDefaultPage(id, DEFAULT_PAGE_NAMES[locale]);
   return { pages: [page], activePageId: page.id };
 }
 
-export function createDefaultPreferences(locale: Locale = "zh-TW"): PreferencesV1 {
+export function createDefaultPreferences(locale: Locale = "zh-TW"): PreferencesV2 {
   return {
     locale,
     toolbar: {

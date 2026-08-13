@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  SCHEMA_VERSION,
   STORAGE_KEYS,
   createDefaultPreferences,
   createDefaultWorkspace,
@@ -15,7 +16,7 @@ import {
   saveWorkspace,
   type StorageLike,
 } from "./storage";
-import type { WorkspaceStorageEnvelopeV1 } from "./types";
+import type { WorkspaceStorageEnvelopeV2 } from "./types";
 
 class MemoryStorage implements StorageLike {
   values = new Map<string, string>();
@@ -68,10 +69,45 @@ describe("local persistence", () => {
     const hydrated = hydrateDomainData("zh-TW", storage);
 
     expect(hydrated.preferencesLoad.status).toBe("ok");
+    expect(hydrated.preferencesLoad).toMatchObject({
+      status: "ok",
+      data: { schemaVersion: SCHEMA_VERSION },
+    });
     expect(hydrated.preferencesRevision).toBe(3);
     expect(hydrated.preferences.toolbar).toEqual({
       ...legacyPreferences.toolbar,
       verticalOffsetRatio: 0,
+    });
+  });
+
+  it("hydrates legacy pages without changing their pixel font setting", () => {
+    const storage = new MemoryStorage();
+    const workspace = createDefaultWorkspace("en", "legacy-page");
+    const legacyPage = { ...workspace.pages[0] } as Record<string, unknown>;
+    delete legacyPage.fontScalePercent;
+    storage.setItem(
+      STORAGE_KEYS.workspace,
+      JSON.stringify({
+        format: "simple-white-board/local-workspace",
+        schemaVersion: 1,
+        revision: 7,
+        savedAt: "2026-08-12T00:00:00.000Z",
+        writerId: "legacy-tab",
+        workspace: { pages: [legacyPage], activePageId: "legacy-page" },
+      }),
+    );
+
+    const hydrated = hydrateDomainData("zh-TW", storage);
+
+    expect(hydrated.workspaceLoad.status).toBe("ok");
+    expect(hydrated.workspaceLoad).toMatchObject({
+      status: "ok",
+      data: { schemaVersion: SCHEMA_VERSION },
+    });
+    expect(hydrated.workspaceRevision).toBe(7);
+    expect(hydrated.workspace.pages[0]).toMatchObject({
+      maxFontSizePx: 80,
+      fontScalePercent: null,
     });
   });
 
@@ -338,9 +374,9 @@ describe("workspace autosave and multi-tab conflicts", () => {
       revision: 1,
     });
     const remoteWorkspace = createDefaultWorkspace("en", "remote");
-    const remote: WorkspaceStorageEnvelopeV1 = {
+    const remote: WorkspaceStorageEnvelopeV2 = {
       format: "simple-white-board/local-workspace",
-      schemaVersion: 1,
+      schemaVersion: SCHEMA_VERSION,
       revision: 2,
       savedAt: "2026-08-12T00:00:00.000Z",
       writerId: "tab-b",
@@ -372,9 +408,9 @@ describe("workspace autosave and multi-tab conflicts", () => {
       writerId: "tab-a",
       revision: 1,
     });
-    const envelope: WorkspaceStorageEnvelopeV1 = {
+    const envelope: WorkspaceStorageEnvelopeV2 = {
       format: "simple-white-board/local-workspace",
-      schemaVersion: 1,
+      schemaVersion: SCHEMA_VERSION,
       revision: 1,
       savedAt: "2026-08-12T00:00:00.000Z",
       writerId: "tab-b",
