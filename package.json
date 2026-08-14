@@ -33,7 +33,6 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "perf:smoke": "node scripts/perf-smoke.mjs",
-    "perf:accept": "node scripts/perf-accept.mjs",
     "check": "npm run lint && npm run test && npm run build && npm run check:bundle"
   },
   "dependencies": {

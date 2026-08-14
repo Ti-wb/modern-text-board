@@ -15,12 +15,10 @@ export const LIMITS = Object.freeze({
   minFontScalePercent: 5,
   maxFontScalePercent: 100,
   maxAutoFitFontSizePx: 4096,
-  /** Emergency floor used only to keep a marquee compositor layer bounded. */
-  minMarqueeFontSizePx: 8,
-  /** Hard physical-pixel width budget for each marquee text copy. */
-  maxMarqueeLayerDeviceWidthPx: 16_384,
-  /** Hard physical-pixel area budget for each marquee text copy. */
-  maxMarqueeLayerDeviceAreaPx: 8_000_000,
+  /** Prevent a single no-wrap compositor layer from growing without bound. */
+  maxMarqueeLayerWidthPx: 16_384,
+  /** Tighten the CSS-pixel cap on high-DPR displays with limited GPU memory. */
+  maxMarqueeLayerDeviceWidthPx: 32_768,
   minMarqueeSpeed: 1,
   maxMarqueeSpeed: 40,
   marqueeSpeedStep: 0.1,

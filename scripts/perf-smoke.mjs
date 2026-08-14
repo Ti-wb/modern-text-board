@@ -1,4 +1,4 @@
-/* global Animation, Buffer, Element, HTMLElement, PerformanceObserver, console, document, getComputedStyle, performance, process, requestAnimationFrame, window */
+/* global Animation, Buffer, Element, PerformanceObserver, console, document, getComputedStyle, performance, process, requestAnimationFrame, window */
 import { chromium } from "playwright";
 
 // Examples:
@@ -14,7 +14,6 @@ const RAF_SAMPLE_MS = readPositiveNumber(
   "PERF_RAF_SAMPLE_MS",
   Math.min(3_000, DURATION_MS),
 );
-const SETTLE_MS = readPositiveNumber("PERF_SETTLE_MS", 10_800);
 const SPEED = clamp(readPositiveNumber("PERF_SPEED", 40), 1, 40);
 const DIRECTION = readChoice(
   "PERF_DIRECTION",
@@ -26,14 +25,8 @@ const FLASH_ENABLED = /^(1|true|yes)$/i.test(process.env.PERF_FLASH ?? "false");
 const ENFORCE_BUDGETS = /^(1|true|yes)$/i.test(
   process.env.PERF_ENFORCE ?? "false",
 );
-const REQUIRE_EXPECTED_CADENCE = /^(1|true|yes)$/i.test(
-  process.env.PERF_REQUIRE_EXPECTED_CADENCE ?? "false",
-);
 const VIEWPORT = readViewport(process.env.PERF_VIEWPORT ?? "1024x768");
 const MAX_DROPPED_PERCENT = readPositiveNumber("PERF_MAX_DROPPED_PERCENT", 0.5);
-const MAX_ISOLATED_PAINT_BURSTS = 1;
-const MAX_ISOLATED_PAINT_BURST_MS = 50;
-const MAX_ISOLATED_PAINT_EVENT_MS = 4;
 
 const TRACE_CATEGORIES = [
   "benchmark",
@@ -60,7 +53,6 @@ const CONTENT_SCENARIOS = {
   whitespace: `${" ".repeat(349)}•`,
   emoji: repeatToCodePoints("🧑‍💻🚀✨📱", 350),
 };
-const LARGE_FONT_SCENARIOS = new Set(["large"]);
 
 function readPositiveNumber(name, fallback) {
   const value = Number(process.env[name] ?? fallback);
@@ -126,55 +118,6 @@ function summarizeDurations(events, names) {
     totalMs: durationsMs.reduce((sum, value) => sum + value, 0),
     maxMs: Math.max(0, ...durationsMs),
   };
-}
-
-function summarizeEventWindow(events, names, originTimestamp) {
-  const acceptedNames = new Set(names);
-  const matches = events
-    .filter((event) => acceptedNames.has(event.name) && Number.isFinite(event.ts))
-    .sort((left, right) => left.ts - right.ts);
-  const offsetsMs = matches.map((event) => (event.ts - originTimestamp) / 1_000);
-  return {
-    firstOffsetMs: offsetsMs[0] ?? null,
-    lastOffsetMs: offsetsMs.at(-1) ?? null,
-    sampleOffsetsMs: offsetsMs.slice(0, 6),
-    threads: [...new Set(matches.map((event) => `${event.pid}:${event.tid}`))].slice(0, 6),
-  };
-}
-
-function summarizePaintBursts(events, originTimestamp) {
-  const matches = events
-    .filter(
-      (event) =>
-        (event.name === "Paint" || event.name === "PaintImage") &&
-        Number.isFinite(event.ts) && Number.isFinite(event.dur),
-    )
-    .sort((left, right) => left.ts - right.ts);
-  const bursts = [];
-  for (const event of matches) {
-    const previous = bursts.at(-1);
-    if (!previous || event.ts - previous.lastTimestamp > 50_000) {
-      bursts.push({
-        firstTimestamp: event.ts,
-        lastTimestamp: event.ts,
-        count: 1,
-        totalDurationUs: event.dur,
-        maxDurationUs: event.dur,
-      });
-      continue;
-    }
-    previous.lastTimestamp = event.ts;
-    previous.count += 1;
-    previous.totalDurationUs += event.dur;
-    previous.maxDurationUs = Math.max(previous.maxDurationUs, event.dur);
-  }
-  return bursts.map((burst) => ({
-    firstOffsetMs: (burst.firstTimestamp - originTimestamp) / 1_000,
-    spanMs: (burst.lastTimestamp - burst.firstTimestamp) / 1_000,
-    count: burst.count,
-    totalMs: burst.totalDurationUs / 1_000,
-    maxMs: burst.maxDurationUs / 1_000,
-  }));
 }
 
 function collectScalarStrings(value, target = []) {
@@ -267,13 +210,11 @@ function analyzeChromeFrameSignals(events, refreshRateHz) {
   const drawFrameTimestamps = uniqueSortedTimestamps(events, "DrawFrame");
   const inferred = inferFrameSlots(drawFrameTimestamps, refreshRateHz);
   const hasPipelineStates = Object.values(pipelineCounts).some((count) => count > 0);
-  const useDrawFrameCadence = drawFrameTimestamps.length > 1;
-  const usePipelineStates = !useDrawFrameCadence && hasPipelineStates;
-  const dropped = useDrawFrameCadence
-    ? inferred.droppedSlots
-    : usePipelineStates
-      ? pipelineCounts.dropped
-      : explicitDroppedEvents;
+  const dropped = Math.max(
+    pipelineCounts.dropped,
+    explicitDroppedEvents,
+    inferred.droppedSlots,
+  );
 
   return {
     source: drawFrameTimestamps.length > 1
@@ -281,10 +222,8 @@ function analyzeChromeFrameSignals(events, refreshRateHz) {
       : hasPipelineStates
         ? "chrome-pipeline-reporter"
         : "unavailable",
-    normal: useDrawFrameCadence ? inferred.observedFrames : pipelineCounts.normal,
-    partial: useDrawFrameCadence
-      ? null
-      : pipelineCounts.partial || explicitPartialEvents || null,
+    normal: inferred.observedFrames || pipelineCounts.normal,
+    partial: pipelineCounts.partial || explicitPartialEvents || null,
     dropped,
     pipelineReporter: pipelineCounts,
     pipelineStateSamples,
@@ -292,18 +231,12 @@ function analyzeChromeFrameSignals(events, refreshRateHz) {
     explicitPartialEvents,
     drawFrames: drawFrameTimestamps.length,
     inferred,
-    note: "Exactly one frame domain is authoritative per run: DrawFrame cadence when available, otherwise PipelineReporter states, otherwise explicit dropped events. Partial is unknown for DrawFrame-only traces.",
+    note: "Normal frames use DrawFrame cadence. Chrome PipelineReporter and explicit frame events are folded in when their states are exposed; otherwise dropped slots are inferred and partial remains null.",
   };
 }
 
 function analyzeTrace(traceEvents, refreshRateHz) {
   const frameSignals = analyzeChromeFrameSignals(traceEvents, refreshRateHz);
-  const sampleMarker = traceEvents.find(
-    (event) => event.name === "marquee-perf-sample-start" && Number.isFinite(event.ts),
-  );
-  const originTimestamp = sampleMarker?.ts ?? traceEvents.find(
-    (event) => Number.isFinite(event.ts),
-  )?.ts ?? 0;
   return {
     eventCount: traceEvents.length,
     frameSignals,
@@ -312,15 +245,6 @@ function analyzeTrace(traceEvents, refreshRateHz) {
       style: summarizeDurations(traceEvents, ["UpdateLayoutTree", "RecalculateStyles"]),
       paint: summarizeDurations(traceEvents, ["Paint", "PaintImage"]),
       composite: summarizeDurations(traceEvents, ["CompositeLayers", "DrawFrame"]),
-      eventWindows: {
-        style: summarizeEventWindow(
-          traceEvents,
-          ["UpdateLayoutTree", "RecalculateStyles"],
-          originTimestamp,
-        ),
-        paint: summarizeEventWindow(traceEvents, ["Paint", "PaintImage"], originTimestamp),
-      },
-      paintBursts: summarizePaintBursts(traceEvents, originTimestamp),
     },
     gpu: {
       raster: summarizeDurations(traceEvents, ["RasterTask", "RasterBufferImpl::Playback"]),
@@ -362,12 +286,8 @@ async function captureElementSnapshot(page, dpr = DPR) {
     return copies.map((copy, index) => {
       const rect = copy.getBoundingClientRect();
       const style = getComputedStyle(copy);
-      const physicalWidth = Math.ceil(
-        Math.max(rect.width, copy.offsetWidth, copy.scrollWidth) * dpr,
-      );
-      const physicalHeight = Math.ceil(
-        Math.max(rect.height, copy.offsetHeight, copy.scrollHeight) * dpr,
-      );
+      const physicalWidth = copy.scrollWidth * dpr;
+      const physicalHeight = copy.scrollHeight * dpr;
       return {
         index,
         layoutCssPx: {
@@ -564,12 +484,6 @@ try {
   await page.getByRole("main").dblclick();
   await page.getByRole("textbox", { name: /編輯文字|Edit text/ }).fill(content);
   await page.getByRole("button", { name: /套用|Apply/ }).click();
-  if (LARGE_FONT_SCENARIOS.has(SCENARIO)) {
-    await page.getByRole("button", { name: /字型與字級|Font and size/ }).click();
-    const fontPanel = page.locator("#tool-panel-font");
-    await fontPanel.getByRole("slider", { name: /畫面填滿程度|Screen fill/ }).fill("100");
-    await fontPanel.getByRole("button", { name: /關閉|Close/ }).click();
-  }
   await page.getByRole("button", { name: /跑馬燈|Marquee/ }).click();
   const panel = page.locator("#tool-panel-marquee");
   const enableButton = panel.getByRole("button", { name: /啟用跑馬燈|Enable marquee/ });
@@ -594,37 +508,7 @@ try {
   }
 
   await page.waitForFunction(() => document.querySelectorAll(".marquee-copy").length === 2);
-
-  // Closing a panel deliberately restores focus to its toolbar trigger. That
-  // blocks the idle timer, so a fixed sleep can still begin tracing while the
-  // toolbar fades. Clear setup focus/hover, wait for the actual idle state and
-  // its opacity transition, and keep SETTLE_MS as a minimum raster warm-up.
-  await page.evaluate(() => {
-    const activeElement = document.activeElement;
-    if (activeElement instanceof HTMLElement) activeElement.blur();
-  });
-  await page.mouse.move(1, 1);
-  await Promise.all([
-    page.waitForTimeout(SETTLE_MS),
-    page.waitForFunction(
-      () => document.querySelector(".toolbar-shell")?.classList.contains("is-idle"),
-      undefined,
-      { timeout: Math.max(12_000, SETTLE_MS + 2_000) },
-    ),
-  ]);
-  await page.waitForFunction(() => {
-    const toolbar = document.querySelector(".toolbar-shell");
-    return toolbar !== null && Number.parseFloat(getComputedStyle(toolbar).opacity) <= 0.181;
-  });
-  const configuredPlaybackRates = await page.locator(".marquee-copy").evaluateAll(
-    (copies) => copies.map((copy) => copy.getAnimations()[0]?.playbackRate ?? null),
-  );
-  if (
-    configuredPlaybackRates.length !== 2 ||
-    configuredPlaybackRates.some((rate) => !Number.isFinite(rate) || rate <= 0)
-  ) {
-    throw new Error("Marquee WAAPI playback rate was not configured before sampling.");
-  }
+  await page.waitForTimeout(250);
 
   // Calibrate rAF before tracing. This preserves the old cadence metrics while
   // keeping the production compositor trace free of a per-frame test callback.
@@ -663,6 +547,7 @@ try {
   layerSampler.active = true;
   await page.evaluate(() => performance.mark("marquee-perf-sample-start"));
   await page.waitForTimeout(DURATION_MS);
+  await page.evaluate(() => performance.mark("marquee-perf-sample-end"));
   layerSampler.active = false;
   const trace = await stopAndReadTrace(cdp);
 
@@ -702,27 +587,12 @@ try {
   const droppedPercent = reportedFrameSlots > 0
     ? (traceAnalysis.frameSignals.dropped / reportedFrameSlots) * 100
     : traceAnalysis.frameSignals.inferred.droppedPercent;
-  const measuredRefreshRateHz = rafCalibration.medianMs > 0
-    ? 1_000 / rafCalibration.medianMs
-    : null;
-  const cadenceMatchesExpectation = measuredRefreshRateHz !== null &&
-    Math.abs(measuredRefreshRateHz - EXPECTED_REFRESH_RATE_HZ) /
-      EXPECTED_REFRESH_RATE_HZ <= 0.08;
   const acceptance = {
     droppedFramesAtMostPercent: droppedPercent <= MAX_DROPPED_PERCENT,
     noTwoConsecutiveRefreshSlotsLost:
-      traceAnalysis.frameSignals.source.startsWith("draw-frame") &&
       traceAnalysis.frameSignals.inferred.maxConsecutiveDroppedSlots < 2,
-    cadenceMatchesExpectation:
-      !REQUIRE_EXPECTED_CADENCE || cadenceMatchesExpectation,
-    traceBufferComplete: maxTraceBufferUsage < 0.98,
     steadyLayoutIsZero: traceAnalysis.rendering.layout.count === 0,
-    steadyPaintHasNoContinuousWork:
-      traceAnalysis.rendering.paintBursts.length <= MAX_ISOLATED_PAINT_BURSTS &&
-      (traceAnalysis.rendering.paintBursts[0]?.spanMs ?? 0) <=
-        MAX_ISOLATED_PAINT_BURST_MS &&
-      (traceAnalysis.rendering.paintBursts[0]?.maxMs ?? 0) <=
-        MAX_ISOLATED_PAINT_EVENT_MS,
+    steadyPaintIsZero: traceAnalysis.rendering.paint.count === 0,
     noSteadyAnimationRebuild: animationInstrumentation.animateCallsDuringSample === 0,
     noSteadyRateController: animationInstrumentation.updatePlaybackRateCallsDuringSample === 0,
     layerWidthWithinBudget: maxPhysicalWidth <= 16_384,
@@ -735,7 +605,6 @@ try {
       baseUrl: BASE_URL,
       cpuRate: CPU_RATE,
       durationMs: DURATION_MS,
-      settleMs: SETTLE_MS,
       dpr: DPR,
       expectedRefreshRateHz: EXPECTED_REFRESH_RATE_HZ,
       viewport: VIEWPORT,
@@ -744,14 +613,12 @@ try {
       direction: DIRECTION,
       requestedSpeed: SPEED,
       flashEnabled: FLASH_ENABLED,
-      requireExpectedCadence: REQUIRE_EXPECTED_CADENCE,
-      configuredPlaybackRates,
     },
     rafCalibration: {
       durationMs: RAF_SAMPLE_MS,
       ...rafCalibration,
-      estimatedRefreshRateHz: measuredRefreshRateHz,
-      cadenceMatchesExpectation,
+      estimatedRefreshRateHz:
+        rafCalibration.medianMs > 0 ? 1_000 / rafCalibration.medianMs : null,
     },
     chromeTrace: {
       bytes: trace.bytes,
@@ -776,14 +643,9 @@ try {
       thresholds: {
         maxDroppedPercent: MAX_DROPPED_PERCENT,
         maxConsecutiveDroppedSlots: 1,
-        maxIsolatedPaintBursts: MAX_ISOLATED_PAINT_BURSTS,
-        maxIsolatedPaintBurstMs: MAX_ISOLATED_PAINT_BURST_MS,
-        maxIsolatedPaintEventMs: MAX_ISOLATED_PAINT_EVENT_MS,
         maxLayerDeviceWidthPx: 16_384,
         maxLayerDeviceAreaPx: 8_000_000,
       },
-      paintPolicy:
-        "Continuous paint fails. One short browser backing-store refresh is tolerated only while dropped-frame, consecutive-slot, layout, animation-rebuild, and rate-controller gates also pass.",
       observedDroppedPercent: droppedPercent,
       checks: acceptance,
       passed,

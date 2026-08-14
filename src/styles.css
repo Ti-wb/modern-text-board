@@ -237,33 +237,6 @@ html[data-presentation="true"] .page-indicator {
   will-change: transform;
 }
 
-.moving-text.is-marquee-suppressed .marquee-copy {
-  contain: layout style;
-  will-change: auto;
-}
-
-.moving-text.is-marquee-suppressed .marquee-copy:nth-child(2) {
-  display: none;
-}
-
-.canvas-overflow-warning {
-  position: absolute;
-  z-index: 2;
-  left: 50%;
-  bottom: max(12px, var(--safe-bottom));
-  max-width: min(90%, 560px);
-  margin: 0;
-  padding: 8px 12px;
-  border-radius: 12px;
-  color: #7a3900;
-  background: rgb(255 239 207 / 92%);
-  box-shadow: 0 6px 24px rgb(0 0 0 / 12%);
-  font-size: 14px;
-  line-height: 1.35;
-  text-align: center;
-  transform: translateX(-50%);
-}
-
 .marquee-vertical .marquee-copy {
   width: 100%;
   max-width: 100%;

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
+import { fireEvent, render, screen } from "@testing-library/preact";
 import { describe, expect, it, vi } from "vitest";
 
 import { ToolPanels, type ToolPanelsProps } from "./ToolPanels";
@@ -57,10 +57,8 @@ function renderPanel(
       onTextAlignChange: noop,
     },
     marquee: {
-      devicePixelRatio: 2,
       enabled: false,
       direction: "left",
-      refreshRateHz: 60,
       speed: 5,
       onEnabledChange: noop,
       onDirectionChange: noop,
@@ -112,7 +110,7 @@ describe("ToolPanels keyboard dismissal", () => {
     expect(onFontScaleChange).toHaveBeenCalledWith(100);
   });
 
-  it("coalesces high-range marquee previews to one display-frame update", async () => {
+  it("offers a high-range continuous marquee speed with accessible units", () => {
     const onMarqueeSpeedPreview = vi.fn();
     const onMarqueeSpeedCommit = vi.fn();
     renderPanel(
@@ -127,53 +125,18 @@ describe("ToolPanels keyboard dismissal", () => {
     expect(slider.getAttribute("min")).toBe("1");
     expect(slider.getAttribute("max")).toBe("40");
     expect(slider.getAttribute("step")).toBe("0.1");
-    expect(slider.getAttribute("aria-valuetext")).toBe(
-      "83 pixels per second, adaptive for 60Hz",
-    );
-    expect(screen.getByText("83 px/s · 60Hz adaptive")).toBeTruthy();
+    expect(slider.getAttribute("aria-valuetext")).toBe("84 pixels per second");
+    expect(screen.getByText("84 px/s")).toBeTruthy();
 
-    fireEvent.input(slider, { target: { value: "12.5" } });
-    fireEvent.input(slider, { target: { value: "24.5" } });
     fireEvent.input(slider, { target: { value: "37.5" } });
-    expect(onMarqueeSpeedPreview).not.toHaveBeenCalled();
+    expect(onMarqueeSpeedPreview).toHaveBeenCalledWith(37.5);
     expect(onMarqueeSpeedCommit).not.toHaveBeenCalled();
-
-    await waitFor(() => {
-      expect(onMarqueeSpeedPreview).toHaveBeenCalledOnce();
-      expect(onMarqueeSpeedPreview).toHaveBeenCalledWith(37.5);
-    });
-    expect(screen.getByText("480 px/s · 60Hz adaptive")).toBeTruthy();
-
     fireEvent.pointerUp(slider, { target: { value: "37.5" } });
     expect(onMarqueeSpeedCommit).toHaveBeenCalledOnce();
     expect(onMarqueeSpeedCommit).toHaveBeenCalledWith(37.5);
   });
 
-  it("commits a keyboard speed adjustment only when the key gesture completes", async () => {
-    const onMarqueeSpeedPreview = vi.fn();
-    const onMarqueeSpeedCommit = vi.fn();
-    renderPanel(
-      vi.fn(),
-      "marquee",
-      vi.fn(),
-      onMarqueeSpeedPreview,
-      onMarqueeSpeedCommit,
-    );
-
-    const slider = screen.getByRole("slider", { name: "Speed" });
-    fireEvent.keyDown(slider, { key: "ArrowRight" });
-    fireEvent.input(slider, { target: { value: "5.1" } });
-    expect(onMarqueeSpeedCommit).not.toHaveBeenCalled();
-
-    await waitFor(() => {
-      expect(onMarqueeSpeedPreview).toHaveBeenCalledWith(5.1);
-    });
-    fireEvent.keyUp(slider, { key: "ArrowRight" });
-    expect(onMarqueeSpeedCommit).toHaveBeenCalledOnce();
-    expect(onMarqueeSpeedCommit).toHaveBeenCalledWith(5.1);
-  });
-
-  it("rolls an incomplete marquee speed preview back when the panel closes", async () => {
+  it("rolls an incomplete marquee speed preview back when the panel closes", () => {
     const onMarqueeSpeedPreview = vi.fn();
     const onMarqueeSpeedCommit = vi.fn();
     const view = renderPanel(
@@ -186,9 +149,6 @@ describe("ToolPanels keyboard dismissal", () => {
 
     const slider = screen.getByRole("slider", { name: "Speed" });
     fireEvent.input(slider, { target: { value: "37.5" } });
-    await waitFor(() => {
-      expect(onMarqueeSpeedPreview).toHaveBeenCalledWith(37.5);
-    });
     view.unmount();
 
     expect(onMarqueeSpeedCommit).not.toHaveBeenCalled();

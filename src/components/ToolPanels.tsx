@@ -1,10 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { LIMITS, clamp } from "../domain/defaults";
-import {
-  resolveAdaptiveMarqueeSpeed,
-  speedToPixelsPerSecond,
-} from "../hooks/useMarqueeMotion";
+import { speedToPixelsPerSecond } from "../hooks/useMarqueeMotion";
 import type {
   FontFamily,
   FontWeight,
@@ -46,10 +43,8 @@ export interface AlignPanelControls {
 }
 
 export interface MarqueePanelControls {
-  devicePixelRatio: number;
   enabled: boolean;
   direction: MarqueeDirection;
-  refreshRateHz: number;
   speed: number;
   onEnabledChange: (enabled: boolean) => void;
   onDirectionChange: (direction: MarqueeDirection) => void;
@@ -124,8 +119,8 @@ const COPY = {
     directionUp: "向上",
     directionDown: "向下",
     speed: "速度",
-    speedValue: (speed: number, hz: number) => `${Math.round(speed)} px/s · ${Math.round(hz)}Hz 自適應`,
-    speedAria: (speed: number, hz: number) => `每秒 ${Math.round(speed)} 像素，${Math.round(hz)}Hz 自適應`,
+    speedValue: (speed: number) => `${Math.round(speedToPixelsPerSecond(speed))} px/s`,
+    speedAria: (speed: number) => `每秒 ${Math.round(speedToPixelsPerSecond(speed))} 像素`,
     animationNote: "跑馬燈可與閃爍同時播放；可在設定暫停所有動態。",
     moreTitle: "更多工具",
     mirror: "鏡像文字",
@@ -184,8 +179,8 @@ const COPY = {
     directionUp: "Up",
     directionDown: "Down",
     speed: "Speed",
-    speedValue: (speed: number, hz: number) => `${Math.round(speed)} px/s · ${Math.round(hz)}Hz adaptive`,
-    speedAria: (speed: number, hz: number) => `${Math.round(speed)} pixels per second, adaptive for ${Math.round(hz)}Hz`,
+    speedValue: (speed: number) => `${Math.round(speedToPixelsPerSecond(speed))} px/s`,
+    speedAria: (speed: number) => `${Math.round(speedToPixelsPerSecond(speed))} pixels per second`,
     animationNote: "Marquee and flash can play together. Pause all motion in Settings.",
     moreTitle: "More tools",
     mirror: "Mirror text",
@@ -241,16 +236,6 @@ const COLOR_GROUPS = [
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const FOCUSABLE =
   'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
-const RANGE_COMMIT_KEYS = new Set([
-  "ArrowDown",
-  "ArrowLeft",
-  "ArrowRight",
-  "ArrowUp",
-  "End",
-  "Home",
-  "PageDown",
-  "PageUp",
-]);
 
 function PanelFrame({
   kind,
@@ -528,17 +513,8 @@ function AlignPanel({ controls, copy }: { controls: AlignPanelControls; copy: Co
 function MarqueePanel({ controls, copy }: { controls: MarqueePanelControls; copy: Copy }) {
   const [draftSpeed, setDraftSpeed] = useState(controls.speed);
   const committedSpeedRef = useRef(controls.speed);
-  const draftSpeedRef = useRef(controls.speed);
-  const queuedSpeedRef = useRef<number | null>(null);
-  const previewFrameRef = useRef<number | null>(null);
   const previewCallbackRef = useRef(controls.onSpeedPreview);
   useEffect(() => {
-    if (previewFrameRef.current !== null) {
-      cancelAnimationFrame(previewFrameRef.current);
-      previewFrameRef.current = null;
-    }
-    queuedSpeedRef.current = null;
-    draftSpeedRef.current = controls.speed;
     setDraftSpeed(controls.speed);
     committedSpeedRef.current = controls.speed;
   }, [controls.speed]);
@@ -546,55 +522,27 @@ function MarqueePanel({ controls, copy }: { controls: MarqueePanelControls; copy
     previewCallbackRef.current = controls.onSpeedPreview;
   }, [controls.onSpeedPreview]);
   useEffect(() => () => {
-    if (previewFrameRef.current !== null) {
-      cancelAnimationFrame(previewFrameRef.current);
-    }
     // Closing the panel while a pointer gesture is incomplete is a cancel,
     // so return the compositor animation to the last committed setting.
     previewCallbackRef.current(committedSpeedRef.current);
   }, []);
 
-  const readSpeed = (value: string) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed)
-      ? clamp(parsed, LIMITS.minMarqueeSpeed, LIMITS.maxMarqueeSpeed)
-      : draftSpeedRef.current;
-  };
-  const queueSpeedPreview = (value: string) => {
-    queuedSpeedRef.current = readSpeed(value);
-    if (previewFrameRef.current !== null) return;
-
-    previewFrameRef.current = requestAnimationFrame(() => {
-      previewFrameRef.current = null;
-      const speed = queuedSpeedRef.current;
-      queuedSpeedRef.current = null;
-      if (speed === null) return;
-      draftSpeedRef.current = speed;
-      setDraftSpeed(speed);
-      previewCallbackRef.current(speed);
-    });
+  const previewSpeed = (value: string) => {
+    const speed = Number(value);
+    setDraftSpeed(speed);
+    controls.onSpeedPreview(speed);
   };
   const commitSpeed = (value: string) => {
-    const speed = readSpeed(value);
-    // Keep the final native range value queued for the next display frame.
-    // The workspace commit itself is intentionally limited to completed
-    // pointer/keyboard gestures (with blur as a final safety net).
-    queueSpeedPreview(String(speed));
+    const speed = Number(value);
     if (Math.abs(speed - committedSpeedRef.current) < 0.0001) return;
     committedSpeedRef.current = speed;
     controls.onSpeedCommit(speed);
   };
   const cancelSpeed = (input: HTMLInputElement) => {
-    if (previewFrameRef.current !== null) {
-      cancelAnimationFrame(previewFrameRef.current);
-      previewFrameRef.current = null;
-    }
-    queuedSpeedRef.current = null;
     const speed = committedSpeedRef.current;
     input.value = String(speed);
-    draftSpeedRef.current = speed;
     setDraftSpeed(speed);
-    previewCallbackRef.current(speed);
+    controls.onSpeedPreview(speed);
   };
   const directions: Array<{ value: MarqueeDirection; label: string; icon: IconName }> = [
     { value: "left", label: copy.directionLeft, icon: "arrow-left" },
@@ -602,11 +550,6 @@ function MarqueePanel({ controls, copy }: { controls: MarqueePanelControls; copy
     { value: "up", label: copy.directionUp, icon: "arrow-up" },
     { value: "down", label: copy.directionDown, icon: "arrow-down" },
   ];
-  const adaptiveSpeed = resolveAdaptiveMarqueeSpeed(
-    speedToPixelsPerSecond(draftSpeed),
-    controls.refreshRateHz,
-    controls.devicePixelRatio,
-  );
 
   return (
     <>
@@ -642,12 +585,7 @@ function MarqueePanel({ controls, copy }: { controls: MarqueePanelControls; copy
       <div class="range-block" style="margin-top: 14px">
         <label class="range-label" for="marquee-speed-range">
           <span>{copy.speed}</span>
-          <output aria-hidden="true">
-            {copy.speedValue(
-              adaptiveSpeed.effectivePixelsPerSecond,
-              controls.refreshRateHz,
-            )}
-          </output>
+          <output aria-hidden="true">{copy.speedValue(draftSpeed)}</output>
         </label>
         <div class="range-with-icons">
           <Icon name="turtle" />
@@ -655,28 +593,14 @@ function MarqueePanel({ controls, copy }: { controls: MarqueePanelControls; copy
             aria-valuemax={LIMITS.maxMarqueeSpeed}
             aria-valuemin={LIMITS.minMarqueeSpeed}
             aria-valuenow={draftSpeed}
-            aria-valuetext={copy.speedAria(
-              adaptiveSpeed.effectivePixelsPerSecond,
-              controls.refreshRateHz,
-            )}
+            aria-valuetext={copy.speedAria(draftSpeed)}
             id="marquee-speed-range"
             max={LIMITS.maxMarqueeSpeed}
             min={LIMITS.minMarqueeSpeed}
             onBlur={(event) => commitSpeed(event.currentTarget.value)}
-            onInput={(event) => queueSpeedPreview(event.currentTarget.value)}
-            onKeyUp={(event) => {
-              if (RANGE_COMMIT_KEYS.has(event.key)) {
-                commitSpeed(event.currentTarget.value);
-              }
-            }}
+            onChange={(event) => commitSpeed(event.currentTarget.value)}
+            onInput={(event) => previewSpeed(event.currentTarget.value)}
             onPointerCancel={(event) => cancelSpeed(event.currentTarget)}
-            onPointerDown={(event) => {
-              try {
-                event.currentTarget.setPointerCapture?.(event.pointerId);
-              } catch {
-                // Some engines already own implicit capture for range inputs.
-              }
-            }}
             onPointerUp={(event) => commitSpeed(event.currentTarget.value)}
             step={LIMITS.marqueeSpeedStep}
             style="min-height: 44px"
