@@ -1,4 +1,4 @@
-/* global URLSearchParams, document, performance, requestAnimationFrame, window */
+/* global HTMLCanvasElement, HTMLTemplateElement, URLSearchParams, document, getComputedStyle, performance, requestAnimationFrame, window */
 
 (function initializeMotionProbe() {
   "use strict";

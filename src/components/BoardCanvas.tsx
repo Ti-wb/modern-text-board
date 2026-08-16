@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from "preact/hooks";
 import type { BoardPageV2 } from "../domain/types";
 import { useAutoFit } from "../hooks/useAutoFit";
 import { useCssMarqueeMotion } from "../hooks/useCssMarqueeMotion";
+import type { DisplayCadenceSnapshot } from "../hooks/useDisplayCadence";
 import {
   useMarqueeMotion,
   type MarqueeMotionController,
@@ -13,8 +14,11 @@ import { CanvasMarquee } from "./CanvasMarquee";
 import { QrDisplay } from "./QrDisplay";
 
 interface BoardCanvasProps {
+  devicePixelRatio: number;
+  displayCadence: DisplayCadenceSnapshot;
   page: BoardPageV2;
   placeholder: string;
+  overflowWarning: string;
   editHint: string;
   qrError: string;
   paused: boolean;
@@ -40,8 +44,11 @@ const fontClasses: Record<BoardPageV2["fontFamily"], string> = {
 };
 
 function BoardCanvasView({
+  devicePixelRatio,
+  displayCadence,
   page,
   placeholder,
+  overflowWarning,
   editHint,
   qrError,
   paused,
@@ -68,8 +75,15 @@ function BoardCanvasView({
   const mode = !page.marquee.enabled
     ? "static"
     : horizontalMarquee ? "horizontal" : "vertical";
-  const { fillReferenceSize, fontSize, maxFittingSize, overflow } = useAutoFit({
+  const {
+    fillReferenceSize,
+    fontSize,
+    marqueeBudgetExceeded,
+    maxFittingSize,
+    overflow,
+  } = useAutoFit({
     containerRef: textViewportRef,
+    devicePixelRatio,
     measureRef,
     content: displayText,
     maxSize: page.maxFontSizePx,
@@ -79,20 +93,20 @@ function BoardCanvasView({
     layoutKey: `${page.fontFamily}:${page.fontWeight}:${page.qr.enabled}`
   });
 
-  useEffect(
-    () => onFitChange(fontSize, overflow, maxFittingSize, fillReferenceSize),
-    [fillReferenceSize, fontSize, maxFittingSize, overflow, onFitChange],
-  );
-
-  useMarqueeMotion({
+  const { runtimeBudgetExceeded } = useMarqueeMotion({
     animationKey: page.id,
     direction: page.marquee.direction,
-    enabled: page.marquee.enabled && marqueeEngine === "waapi",
+    devicePixelRatio,
+    enabled:
+      page.marquee.enabled &&
+      marqueeEngine === "waapi" &&
+      !marqueeBudgetExceeded,
     fontSize,
     movingRef,
     primaryCopyRef: primaryMarqueeCopyRef,
     secondaryCopyRef: secondaryMarqueeCopyRef,
     paused,
+    refreshRateHz: displayCadence.refreshRateHz,
     speed: page.marquee.speed,
     viewportRef: textViewportRef,
     controllerRef: marqueeEngine === "waapi" ? marqueeControllerRef : undefined,
@@ -101,7 +115,10 @@ function BoardCanvasView({
   useCssMarqueeMotion({
     animationKey: page.id,
     direction: page.marquee.direction,
-    enabled: page.marquee.enabled && marqueeEngine === "css",
+    enabled:
+      page.marquee.enabled &&
+      marqueeEngine === "css" &&
+      !marqueeBudgetExceeded,
     fontSize,
     movingRef,
     primaryCopyRef: primaryMarqueeCopyRef,
@@ -111,6 +128,25 @@ function BoardCanvasView({
     viewportRef: textViewportRef,
     controllerRef: marqueeEngine === "css" ? marqueeControllerRef : undefined,
   });
+  const marqueeSuppressed = page.marquee.enabled &&
+    (marqueeBudgetExceeded || runtimeBudgetExceeded);
+
+  useEffect(
+    () => onFitChange(
+      fontSize,
+      overflow || marqueeSuppressed,
+      maxFittingSize,
+      fillReferenceSize,
+    ),
+    [
+      fillReferenceSize,
+      fontSize,
+      marqueeSuppressed,
+      maxFittingSize,
+      onFitChange,
+      overflow,
+    ],
+  );
 
   const textColor = page.textColor === "auto" ? (page.theme === "dark" ? "#ffffff" : "#1a1a1e") : page.textColor;
   const textStyle = useMemo(
@@ -187,7 +223,7 @@ function BoardCanvasView({
           >
             {displayText}
           </span>
-          {canvasMarquee ? (
+          {canvasMarquee && !marqueeBudgetExceeded ? (
             <>
               <CanvasMarquee
                 animationKey={page.id}
@@ -208,7 +244,7 @@ function BoardCanvasView({
             </>
           ) : (
             <div
-              class={`moving-text ${page.marquee.enabled ? `is-marquee marquee-${horizontalMarquee ? "horizontal" : "vertical"}` : ""} ${page.flashEnabled ? "is-flashing" : ""} ${paused ? "is-paused" : ""}`}
+              class={`moving-text ${page.marquee.enabled ? `is-marquee marquee-${horizontalMarquee ? "horizontal" : "vertical"}` : ""} ${marqueeSuppressed ? "is-marquee-suppressed" : ""} ${page.flashEnabled ? "is-flashing" : ""} ${paused ? "is-paused" : ""}`}
               data-marquee-engine={page.marquee.enabled ? marqueeEngine : undefined}
               ref={movingRef}
               style={textStyle}
@@ -235,6 +271,11 @@ function BoardCanvasView({
               ))}
             </div>
           )}
+          {marqueeSuppressed ? (
+            <p class="canvas-overflow-warning" role="status">
+              {overflowWarning}
+            </p>
+          ) : null}
         </div>
         {page.qr.enabled && page.qr.payload ? <QrDisplay errorLabel={qrError} payload={page.qr.payload} /> : null}
       </section>

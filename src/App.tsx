@@ -27,6 +27,7 @@ import {
   resolveMarqueeEngine,
   type MarqueeEngineKind,
 } from "./marquee/engine";
+import { useDisplayCadence } from "./hooks/useDisplayCadence";
 import { applyDocumentLocale, getTranslator, resolveLocale } from "./i18n";
 import {
   exitPresentationFullscreen,
@@ -45,6 +46,7 @@ interface ViewportMetrics {
   left: number;
   width: number;
   height: number;
+  devicePixelRatio: number;
 }
 
 interface ToolbarDragState {
@@ -68,6 +70,7 @@ function getViewportMetrics(): ViewportMetrics {
     left: Math.max(0, viewport?.offsetLeft ?? 0),
     width: Math.max(1, viewport?.width ?? window.innerWidth),
     height: Math.max(1, viewport?.height ?? window.innerHeight),
+    devicePixelRatio: Math.max(1, window.devicePixelRatio || 1),
   };
 }
 
@@ -133,6 +136,11 @@ export function App() {
   const pageIndex = workspace.pages.findIndex((item) => item.id === page.id);
   const locale = preferences.locale;
   const t = useMemo(() => getTranslator(locale), [locale]);
+  const marqueePaused =
+    preferences.pauseAnimations || editing || documentHidden;
+  const displayCadence = useDisplayCadence({
+    active: page.marquee.enabled && !marqueePaused,
+  });
   const pwa = usePwaStatus();
   const marqueeLabVisible = useMemo(() => isMarqueeLabVisible(), []);
   const wakeLock = useWakeLock({
@@ -210,6 +218,9 @@ export function App() {
 
   useEffect(() => {
     const visualViewport = window.visualViewport;
+    let resolutionQuery = window.matchMedia(
+      `(resolution: ${window.devicePixelRatio || 1}dppx)`,
+    );
     const updateVisualViewport = () => {
       const next = getViewportMetrics();
       viewportRef.current = next;
@@ -217,7 +228,8 @@ export function App() {
         current.top === next.top &&
         current.left === next.left &&
         current.width === next.width &&
-        current.height === next.height
+        current.height === next.height &&
+        current.devicePixelRatio === next.devicePixelRatio
           ? current
           : next
       );
@@ -226,12 +238,22 @@ export function App() {
       document.documentElement.style.setProperty("--visual-viewport-top", `${next.top}px`);
       document.documentElement.style.setProperty("--visual-viewport-left", `${next.left}px`);
     };
+    const updateResolution = () => {
+      resolutionQuery.removeEventListener("change", updateResolution);
+      updateVisualViewport();
+      resolutionQuery = window.matchMedia(
+        `(resolution: ${window.devicePixelRatio || 1}dppx)`,
+      );
+      resolutionQuery.addEventListener("change", updateResolution);
+    };
     updateVisualViewport();
+    resolutionQuery.addEventListener("change", updateResolution);
     visualViewport?.addEventListener("resize", updateVisualViewport);
     visualViewport?.addEventListener("scroll", updateVisualViewport);
     window.addEventListener("resize", updateVisualViewport);
     window.addEventListener("orientationchange", updateVisualViewport);
     return () => {
+      resolutionQuery.removeEventListener("change", updateResolution);
       visualViewport?.removeEventListener("resize", updateVisualViewport);
       visualViewport?.removeEventListener("scroll", updateVisualViewport);
       window.removeEventListener("resize", updateVisualViewport);
@@ -469,7 +491,7 @@ export function App() {
     offline: pwa.offlineReady ? "ready" : pwa.supported ? "preparing" : "unavailable",
     update: pwa.phase === "updating" ? "updating" : pwa.updateAvailable ? "available" : pwa.supported ? "current" : "unavailable"
   };
-  const paused = preferences.pauseAnimations || editing || documentHidden;
+  const paused = marqueePaused;
   const pwaBannerVisible = !presentation && pwa.phase !== "idle" && pwa.phase !== "ready";
   const toolbarPositionX =
     viewport.left + preferences.toolbar.offsetRatio * viewport.width;
@@ -491,6 +513,8 @@ export function App() {
   return (
     <div class={shellClass} data-marquee-engine={marqueeEngine} onPointerDown={activateToolbar}>
       <BoardCanvas
+        devicePixelRatio={viewport.devicePixelRatio}
+        displayCadence={displayCadence}
         editHint={locale === "zh-TW" ? "雙擊畫面編輯文字" : "Double-click the board to edit"}
         marqueeControllerRef={marqueeControllerRef}
         marqueeEngine={marqueeEngine}
@@ -501,6 +525,7 @@ export function App() {
         page={page}
         paused={paused}
         placeholder={t("canvas.placeholder")}
+        overflowWarning={t("canvas.overflow")}
         presentation={presentation}
         qrError={t("qr.generateFailed")}
       />
@@ -584,8 +609,10 @@ export function App() {
             kind={panel}
             locale={locale}
             marquee={{
+              devicePixelRatio: viewport.devicePixelRatio,
               enabled: page.marquee.enabled,
               direction: page.marquee.direction,
+              refreshRateHz: displayCadence.refreshRateHz,
               speed: page.marquee.speed,
               onEnabledChange: (enabled) => dispatchWorkspace({ type: "page/set-marquee-enabled", pageId: page.id, enabled }),
               onDirectionChange: (direction) => dispatchWorkspace({ type: "page/set-marquee-direction", pageId: page.id, direction }),

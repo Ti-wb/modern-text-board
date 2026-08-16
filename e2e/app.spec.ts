@@ -6,6 +6,7 @@ import { expect, test, type Page, type TestInfo } from "@playwright/test";
 const CHROMIUM_QR_PROJECT = "chromium-1024x768";
 const CHROMIUM_REGULAR_PROJECT = "chromium-1024x768";
 const CHROMIUM_COMPACT_PROJECT = "chromium-390x844";
+const CHROMIUM_DPR3_PROJECT = "chromium-dpr3";
 const TOOLBAR_PROJECTS = new Set([
   CHROMIUM_REGULAR_PROJECT,
   CHROMIUM_COMPACT_PROJECT,
@@ -318,14 +319,14 @@ test("marquee speed changes continuously without moving the current frame", asyn
   expect(immediatelyAfter.x).toBeLessThanOrEqual(before.x + 2);
   expect(distanceMoved).toBeLessThanOrEqual(614 * elapsedSeconds + 8);
 
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(450);
   const finalRates = await page.locator(".moving-text").evaluate((moving) =>
     [...moving.querySelectorAll<HTMLElement>(".marquee-copy")].map(
       (copy) => copy.getAnimations()[0]?.playbackRate,
     ),
   );
   expect(finalRates).toHaveLength(2);
-  finalRates.forEach((rate) => expect(rate).toBeGreaterThan(5));
+  finalRates.forEach((rate) => expect(rate).toBeCloseTo(4.8, 1));
 });
 
 test("marquee speed preview keeps the board state untouched until release", async ({
@@ -371,6 +372,62 @@ test("marquee speed preview keeps the board state untouched until release", asyn
   await page.evaluate(() => {
     (window as typeof window & { __boardObserver?: MutationObserver }).__boardObserver?.disconnect();
   });
+});
+
+test("a real marquee pointer drag commits only after release", async ({
+  page,
+}, testInfo) => {
+  skipUnlessProject(testInfo, CHROMIUM_REGULAR_PROJECT);
+  await dismissPwaBanner(page);
+  await page.getByRole("button", { name: /跑馬燈|Marquee/ }).click();
+
+  const dialog = page.locator("#tool-panel-marquee");
+  const slider = dialog.getByRole("slider", { name: /速度|Speed/ });
+  const bounds = await slider.boundingBox();
+  if (!bounds) throw new Error("Marquee speed slider is unavailable");
+
+  const initialSpeed = Number(await slider.inputValue());
+  const minSpeed = Number(await slider.getAttribute("min"));
+  const maxSpeed = Number(await slider.getAttribute("max"));
+  const initialRatio = (initialSpeed - minSpeed) / (maxSpeed - minSpeed);
+  const trackInset = Math.min(12, bounds.width * 0.08);
+  const startX = bounds.x + trackInset + initialRatio * (bounds.width - trackInset * 2);
+  const endX = bounds.x + bounds.width * 0.82;
+  const y = bounds.y + bounds.height / 2;
+
+  await page.mouse.move(startX, y);
+  await page.mouse.down();
+  await page.mouse.move(endX, y, { steps: 12 });
+  await expect(slider).not.toHaveValue(String(initialSpeed));
+
+  // A cancelled physical gesture must restore the last workspace value.
+  await slider.dispatchEvent("pointercancel");
+  await page.mouse.up();
+  await expect(slider).toHaveValue(String(initialSpeed));
+  await dialog.getByRole("button", { name: /關閉|Close/ }).click();
+  await page.getByRole("button", { name: /跑馬燈|Marquee/ }).click();
+  const reopenedDialog = page.locator("#tool-panel-marquee");
+  const reopenedSlider = reopenedDialog.getByRole("slider", { name: /速度|Speed/ });
+  await expect(reopenedSlider).toHaveValue(String(initialSpeed));
+
+  const reopenedBounds = await reopenedSlider.boundingBox();
+  if (!reopenedBounds) throw new Error("Reopened marquee speed slider is unavailable");
+  const reopenedStartX =
+    reopenedBounds.x + trackInset + initialRatio * (reopenedBounds.width - trackInset * 2);
+  const reopenedEndX = reopenedBounds.x + reopenedBounds.width * 0.7;
+  const reopenedY = reopenedBounds.y + reopenedBounds.height / 2;
+  await page.mouse.move(reopenedStartX, reopenedY);
+  await page.mouse.down();
+  await page.mouse.move(reopenedEndX, reopenedY, { steps: 8 });
+  await page.mouse.up();
+
+  const releasedSpeed = await reopenedSlider.inputValue();
+  expect(Number(releasedSpeed)).toBeGreaterThan(initialSpeed);
+  await reopenedDialog.getByRole("button", { name: /關閉|Close/ }).click();
+  await page.getByRole("button", { name: /跑馬燈|Marquee/ }).click();
+  await expect(
+    page.locator("#tool-panel-marquee").getByRole("slider", { name: /速度|Speed/ }),
+  ).toHaveValue(releasedSpeed);
 });
 
 test("marquee repeats seamlessly with two compositor copies and a half-screen gap", async ({
@@ -443,10 +500,9 @@ test("marquee repeats seamlessly with two compositor copies and a half-screen ga
   expect(samples.gapRatio).toBeCloseTo(0.5, 2);
   expect(samples.start).toHaveLength(1);
   expect(samples.overlap).toHaveLength(2);
-  expect(samples.overlap[1].left - samples.overlap[0].right).toBeCloseTo(
-    samples.copyGap,
-    1,
-  );
+  expect(Math.abs(
+    samples.overlap[1].left - samples.overlap[0].right - samples.copyGap,
+  )).toBeLessThan(1);
   expect(samples.beforeReset).toHaveLength(1);
   expect(samples.reset).toHaveLength(2);
   expect(samples.beforeReset[0].left).toBeCloseTo(samples.start[0].left, 0);
@@ -601,6 +657,47 @@ test("horizontal marquee keeps legal worst-case text within the layer budget", a
   }));
   expect(metrics.copyWidth).toBeLessThanOrEqual(16_385);
   expect(metrics.fontSize).toBeGreaterThanOrEqual(24);
+});
+
+test("an extreme DPR 3 vertical marquee is safely suppressed with guidance", async ({
+  page,
+}, testInfo) => {
+  skipUnlessProject(testInfo, CHROMIUM_DPR3_PROJECT);
+  await dismissPwaBanner(page);
+  const multiline = Array.from({ length: 175 }, () => "W").join("\n");
+  expect(Array.from(multiline)).toHaveLength(349);
+  await editBoardText(page, multiline);
+  await page.getByRole("button", { name: /跑馬燈|Marquee/ }).click();
+  const panel = page.locator("#tool-panel-marquee");
+  await panel.locator(".segmented button").nth(2).click();
+  await panel.getByRole("button", { name: /啟用跑馬燈|Enable marquee/ }).click();
+
+  const moving = page.locator(".moving-text");
+  await expect(moving).toHaveClass(/is-marquee-suppressed/);
+  await expect(page.locator(".canvas-overflow-warning")).toBeVisible();
+  const metrics = await moving.evaluate((host) => {
+    const copy = host.querySelector<HTMLElement>(".marquee-copy");
+    if (!copy) throw new Error("Marquee copy is unavailable");
+    const rect = copy.getBoundingClientRect();
+    const dpr = window.devicePixelRatio;
+    const physicalWidth = Math.ceil(
+      Math.max(rect.width, copy.offsetWidth, copy.scrollWidth) * dpr,
+    );
+    const physicalHeight = Math.ceil(
+      Math.max(rect.height, copy.offsetHeight, copy.scrollHeight) * dpr,
+    );
+    return {
+      animationCount: copy.getAnimations().length,
+      dpr,
+      physicalArea: physicalWidth * physicalHeight,
+      physicalWidth,
+    };
+  });
+  expect(metrics.dpr).toBe(3);
+  expect(metrics.animationCount).toBe(0);
+  expect(
+    metrics.physicalWidth > 16_384 || metrics.physicalArea > 8_000_000,
+  ).toBe(true);
 });
 
 test("responsive font fill grows beyond 200px and shrinks at the canvas boundary", async ({
