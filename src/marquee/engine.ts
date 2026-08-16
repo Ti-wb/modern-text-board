@@ -1,4 +1,4 @@
-export type MarqueeEngineKind = "waapi" | "css";
+export type MarqueeEngineKind = "waapi" | "css" | "canvas";
 
 const ENGINE_PARAM = "marquee-engine";
 const LAB_PARAM = "marquee-lab";
@@ -7,7 +7,7 @@ export function resolveMarqueeEngine(
   search = typeof window === "undefined" ? "" : window.location.search,
 ): MarqueeEngineKind {
   const value = new URLSearchParams(search).get(ENGINE_PARAM);
-  return value === "css" ? "css" : "waapi";
+  return value === "css" || value === "canvas" ? value : "waapi";
 }
 
 export function isMarqueeLabVisible(

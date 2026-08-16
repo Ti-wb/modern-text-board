@@ -9,6 +9,7 @@ import {
   type MarqueeMotionController,
 } from "../hooks/useMarqueeMotion";
 import type { MarqueeEngineKind } from "../marquee/engine";
+import { CanvasMarquee } from "./CanvasMarquee";
 import { QrDisplay } from "./QrDisplay";
 
 interface BoardCanvasProps {
@@ -63,6 +64,7 @@ function BoardCanvasView({
   const horizontalMarquee = page.marquee.enabled &&
     (page.marquee.direction === "left" || page.marquee.direction === "right");
   const verticalMarquee = page.marquee.enabled && !horizontalMarquee;
+  const canvasMarquee = page.marquee.enabled && marqueeEngine === "canvas";
   const mode = !page.marquee.enabled
     ? "static"
     : horizontalMarquee ? "horizontal" : "vertical";
@@ -185,33 +187,54 @@ function BoardCanvasView({
           >
             {displayText}
           </span>
-          <div
-            class={`moving-text ${page.marquee.enabled ? `is-marquee marquee-${horizontalMarquee ? "horizontal" : "vertical"}` : ""} ${page.flashEnabled ? "is-flashing" : ""} ${paused ? "is-paused" : ""}`}
-            data-marquee-engine={page.marquee.enabled ? marqueeEngine : undefined}
-            ref={movingRef}
-            style={textStyle}
-          >
-            {(page.marquee.enabled ? [0, 1] : [0]).map((copyIndex) => (
-              <div
-                aria-hidden={page.marquee.enabled && copyIndex !== 0}
-                class={page.marquee.enabled ? "marquee-copy" : undefined}
-                key={copyIndex}
-                ref={
-                  page.marquee.enabled
-                    ? copyIndex === 0
-                      ? primaryMarqueeCopyRef
-                      : secondaryMarqueeCopyRef
-                    : undefined
-                }
-              >
-                <div class={page.mirrored ? "is-mirrored" : ""}>
-                  <p class={`display-text ${fontClasses[page.fontFamily]} ${horizontalMarquee ? "no-wrap" : ""}`}>
-                    {displayText}
-                  </p>
+          {canvasMarquee ? (
+            <>
+              <CanvasMarquee
+                animationKey={page.id}
+                color={textColor}
+                controllerRef={marqueeControllerRef}
+                direction={page.marquee.direction}
+                flashEnabled={page.flashEnabled}
+                fontFamily={page.fontFamily}
+                fontSize={fontSize}
+                fontWeight={page.fontWeight}
+                mirrored={page.mirrored}
+                paused={paused}
+                speed={page.marquee.speed}
+                text={displayText}
+                textAlign={page.textAlign}
+              />
+              <p class="sr-only">{displayText}</p>
+            </>
+          ) : (
+            <div
+              class={`moving-text ${page.marquee.enabled ? `is-marquee marquee-${horizontalMarquee ? "horizontal" : "vertical"}` : ""} ${page.flashEnabled ? "is-flashing" : ""} ${paused ? "is-paused" : ""}`}
+              data-marquee-engine={page.marquee.enabled ? marqueeEngine : undefined}
+              ref={movingRef}
+              style={textStyle}
+            >
+              {(page.marquee.enabled ? [0, 1] : [0]).map((copyIndex) => (
+                <div
+                  aria-hidden={page.marquee.enabled && copyIndex !== 0}
+                  class={page.marquee.enabled ? "marquee-copy" : undefined}
+                  key={copyIndex}
+                  ref={
+                    page.marquee.enabled
+                      ? copyIndex === 0
+                        ? primaryMarqueeCopyRef
+                        : secondaryMarqueeCopyRef
+                      : undefined
+                  }
+                >
+                  <div class={page.mirrored ? "is-mirrored" : ""}>
+                    <p class={`display-text ${fontClasses[page.fontFamily]} ${horizontalMarquee ? "no-wrap" : ""}`}>
+                      {displayText}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
         {page.qr.enabled && page.qr.payload ? <QrDisplay errorLabel={qrError} payload={page.qr.payload} /> : null}
       </section>
