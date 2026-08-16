@@ -2,6 +2,7 @@ import type { JSX } from "preact";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "preact/hooks";
 
 import { BoardCanvas } from "./components/BoardCanvas";
+import { MarqueeLabSwitcher } from "./components/MarqueeLabSwitcher";
 import { OverlayFrame } from "./components/OverlayFrame";
 import { PageManager } from "./components/PageManager";
 import { PwaStatus } from "./components/PwaStatus";
@@ -20,6 +21,12 @@ import {
 import { getActivePage, preferencesReducer, workspaceReducer } from "./domain/reducer";
 import type { Locale } from "./domain/types";
 import type { MarqueeMotionController } from "./hooks/useMarqueeMotion";
+import {
+  isMarqueeLabVisible,
+  replaceMarqueeEngineInUrl,
+  resolveMarqueeEngine,
+  type MarqueeEngineKind,
+} from "./marquee/engine";
 import { applyDocumentLocale, getTranslator, resolveLocale } from "./i18n";
 import {
   exitPresentationFullscreen,
@@ -115,6 +122,7 @@ export function App() {
   const [toolbarFocused, setToolbarFocused] = useState(false);
   const [viewport, setViewport] = useState<ViewportMetrics>(getViewportMetrics);
   const [documentHidden, setDocumentHidden] = useState(document.visibilityState === "hidden");
+  const [marqueeEngine, setMarqueeEngine] = useState(resolveMarqueeEngine);
   const [toast, setToast] = useState<{ message: string; error?: boolean } | null>(null);
   const idleTimerRef = useRef<number | null>(null);
   const dragStateRef = useRef<ToolbarDragState | null>(null);
@@ -126,6 +134,7 @@ export function App() {
   const locale = preferences.locale;
   const t = useMemo(() => getTranslator(locale), [locale]);
   const pwa = usePwaStatus();
+  const marqueeLabVisible = useMemo(() => isMarqueeLabVisible(), []);
   const wakeLock = useWakeLock({
     enabled: preferences.keepScreenAwake,
     presentationActive: presentation
@@ -474,11 +483,17 @@ export function App() {
     page.marquee.enabled && !paused ? "has-active-marquee" : null,
   ].filter(Boolean).join(" ");
 
+  const changeMarqueeEngine = useCallback((engine: MarqueeEngineKind) => {
+    replaceMarqueeEngineInUrl(engine);
+    setMarqueeEngine(engine);
+  }, []);
+
   return (
-    <div class={shellClass} onPointerDown={activateToolbar}>
+    <div class={shellClass} data-marquee-engine={marqueeEngine} onPointerDown={activateToolbar}>
       <BoardCanvas
         editHint={locale === "zh-TW" ? "雙擊畫面編輯文字" : "Double-click the board to edit"}
         marqueeControllerRef={marqueeControllerRef}
+        marqueeEngine={marqueeEngine}
         onEdit={openEditor}
         onFitChange={handleFitChange}
         onNext={showNextPage}
@@ -489,6 +504,10 @@ export function App() {
         presentation={presentation}
         qrError={t("qr.generateFailed")}
       />
+
+      {marqueeLabVisible && !presentation ? (
+        <MarqueeLabSwitcher engine={marqueeEngine} onChange={changeMarqueeEngine} />
+      ) : null}
 
       {!presentation ? (
         <>

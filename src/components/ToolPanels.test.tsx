@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/preact";
+import { act, fireEvent, render, screen } from "@testing-library/preact";
 import { describe, expect, it, vi } from "vitest";
 
 import { ToolPanels, type ToolPanelsProps } from "./ToolPanels";
@@ -111,6 +111,13 @@ describe("ToolPanels keyboard dismissal", () => {
   });
 
   it("offers a high-range continuous marquee speed with accessible units", () => {
+    let previewFrame: FrameRequestCallback | null = null;
+    const animationFrame = vi
+      .spyOn(globalThis, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        previewFrame = callback;
+        return 99;
+      });
     const onMarqueeSpeedPreview = vi.fn();
     const onMarqueeSpeedCommit = vi.fn();
     renderPanel(
@@ -129,11 +136,14 @@ describe("ToolPanels keyboard dismissal", () => {
     expect(screen.getByText("84 px/s")).toBeTruthy();
 
     fireEvent.input(slider, { target: { value: "37.5" } });
+    expect(onMarqueeSpeedPreview).not.toHaveBeenCalled();
+    act(() => previewFrame?.(performance.now()));
     expect(onMarqueeSpeedPreview).toHaveBeenCalledWith(37.5);
     expect(onMarqueeSpeedCommit).not.toHaveBeenCalled();
     fireEvent.pointerUp(slider, { target: { value: "37.5" } });
     expect(onMarqueeSpeedCommit).toHaveBeenCalledOnce();
     expect(onMarqueeSpeedCommit).toHaveBeenCalledWith(37.5);
+    animationFrame.mockRestore();
   });
 
   it("rolls an incomplete marquee speed preview back when the panel closes", () => {

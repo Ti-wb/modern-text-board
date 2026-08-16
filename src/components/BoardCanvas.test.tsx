@@ -21,6 +21,7 @@ function renderCanvas(overrides = {}) {
     <BoardCanvas
       editHint="Double-click to edit"
       marqueeControllerRef={{ current: null }}
+      marqueeEngine="waapi"
       page={page}
       paused={false}
       placeholder="Tap to enter text"
@@ -77,6 +78,7 @@ describe("BoardCanvas", () => {
       <BoardCanvas
         editHint="Double-click to edit"
         marqueeControllerRef={{ current: null }}
+        marqueeEngine="waapi"
         onEdit={vi.fn()}
         onFitChange={vi.fn()}
         onNext={vi.fn()}

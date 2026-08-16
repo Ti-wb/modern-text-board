@@ -243,11 +243,18 @@ html[data-presentation="true"] .page-indicator {
 }
 
 .moving-text.is-marquee.uses-css-marquee .marquee-copy {
-  animation: marquee-motion var(--marquee-fallback-duration) linear infinite;
+  animation-duration: var(--marquee-fallback-duration);
+  animation-iteration-count: infinite;
+  animation-name: marquee-motion;
+  animation-timing-function: linear;
+  animation-delay: var(--marquee-primary-delay, 0s);
 }
 
 .moving-text.is-marquee.uses-css-marquee .marquee-copy:nth-child(2) {
-  animation-delay: var(--marquee-fallback-half-delay);
+  animation-delay: var(
+    --marquee-secondary-delay,
+    var(--marquee-fallback-half-delay)
+  );
 }
 
 .moving-text.is-paused .marquee-copy,
@@ -279,10 +286,10 @@ html[data-presentation="true"] .page-indicator {
 
 @keyframes marquee-motion {
   from {
-    transform: translate(var(--marquee-start-x), var(--marquee-start-y));
+    transform: translate3d(var(--marquee-start-x), var(--marquee-start-y), 0);
   }
   to {
-    transform: translate(var(--marquee-end-x), var(--marquee-end-y));
+    transform: translate3d(var(--marquee-end-x), var(--marquee-end-y), 0);
   }
 }
 
@@ -310,6 +317,45 @@ html[data-presentation="true"] .page-indicator {
 
 .font-system-mono {
   font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.marquee-lab-switcher {
+  position: fixed;
+  z-index: 80;
+  top: max(10px, var(--safe-top));
+  left: max(10px, var(--safe-left));
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  color: #fff;
+  background: rgba(18, 18, 20, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.24);
+  font-size: 11px;
+  line-height: 1;
+  backdrop-filter: blur(14px);
+}
+
+.marquee-lab-options {
+  display: flex;
+  gap: 4px;
+}
+
+.marquee-lab-options button {
+  min-height: 36px;
+  padding: 0 10px;
+  color: rgba(255, 255, 255, 0.74);
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.marquee-lab-options button.is-active {
+  color: #fff;
+  background: #007aff;
 }
 
 .qr-stage {

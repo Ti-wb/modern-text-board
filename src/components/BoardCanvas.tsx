@@ -3,10 +3,12 @@ import { memo } from "preact/compat";
 import { useEffect, useMemo, useRef } from "preact/hooks";
 import type { BoardPageV2 } from "../domain/types";
 import { useAutoFit } from "../hooks/useAutoFit";
+import { useCssMarqueeMotion } from "../hooks/useCssMarqueeMotion";
 import {
   useMarqueeMotion,
   type MarqueeMotionController,
 } from "../hooks/useMarqueeMotion";
+import type { MarqueeEngineKind } from "../marquee/engine";
 import { QrDisplay } from "./QrDisplay";
 
 interface BoardCanvasProps {
@@ -16,6 +18,7 @@ interface BoardCanvasProps {
   qrError: string;
   paused: boolean;
   presentation: boolean;
+  marqueeEngine: MarqueeEngineKind;
   marqueeControllerRef: RefObject<MarqueeMotionController>;
   onEdit: () => void;
   onNext: () => void;
@@ -42,6 +45,7 @@ function BoardCanvasView({
   qrError,
   paused,
   presentation,
+  marqueeEngine,
   marqueeControllerRef,
   onEdit,
   onNext,
@@ -81,7 +85,7 @@ function BoardCanvasView({
   useMarqueeMotion({
     animationKey: page.id,
     direction: page.marquee.direction,
-    enabled: page.marquee.enabled,
+    enabled: page.marquee.enabled && marqueeEngine === "waapi",
     fontSize,
     movingRef,
     primaryCopyRef: primaryMarqueeCopyRef,
@@ -89,7 +93,21 @@ function BoardCanvasView({
     paused,
     speed: page.marquee.speed,
     viewportRef: textViewportRef,
-    controllerRef: marqueeControllerRef,
+    controllerRef: marqueeEngine === "waapi" ? marqueeControllerRef : undefined,
+  });
+
+  useCssMarqueeMotion({
+    animationKey: page.id,
+    direction: page.marquee.direction,
+    enabled: page.marquee.enabled && marqueeEngine === "css",
+    fontSize,
+    movingRef,
+    primaryCopyRef: primaryMarqueeCopyRef,
+    secondaryCopyRef: secondaryMarqueeCopyRef,
+    paused,
+    speed: page.marquee.speed,
+    viewportRef: textViewportRef,
+    controllerRef: marqueeEngine === "css" ? marqueeControllerRef : undefined,
   });
 
   const textColor = page.textColor === "auto" ? (page.theme === "dark" ? "#ffffff" : "#1a1a1e") : page.textColor;
@@ -154,7 +172,11 @@ function BoardCanvasView({
       ) : null}
       {!presentation ? <p aria-hidden="true" class="edit-hint">{editHint}</p> : null}
       <section class={`board-layout ${page.qr.enabled && page.qr.payload ? "has-qr" : ""}`}>
-        <div class="text-viewport" ref={textViewportRef}>
+        <div
+          class="text-viewport"
+          data-marquee-engine={page.marquee.enabled ? marqueeEngine : undefined}
+          ref={textViewportRef}
+        >
           <span
             aria-hidden="true"
             class={`text-measure ${fontClasses[page.fontFamily]}`}
@@ -165,6 +187,7 @@ function BoardCanvasView({
           </span>
           <div
             class={`moving-text ${page.marquee.enabled ? `is-marquee marquee-${horizontalMarquee ? "horizontal" : "vertical"}` : ""} ${page.flashEnabled ? "is-flashing" : ""} ${paused ? "is-paused" : ""}`}
+            data-marquee-engine={page.marquee.enabled ? marqueeEngine : undefined}
             ref={movingRef}
             style={textStyle}
           >

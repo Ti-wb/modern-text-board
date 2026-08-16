@@ -513,27 +513,50 @@ function AlignPanel({ controls, copy }: { controls: AlignPanelControls; copy: Co
 function MarqueePanel({ controls, copy }: { controls: MarqueePanelControls; copy: Copy }) {
   const [draftSpeed, setDraftSpeed] = useState(controls.speed);
   const committedSpeedRef = useRef(controls.speed);
+  const pendingSpeedRef = useRef(controls.speed);
+  const previewFrameRef = useRef<number | null>(null);
   const previewCallbackRef = useRef(controls.onSpeedPreview);
   useEffect(() => {
     setDraftSpeed(controls.speed);
     committedSpeedRef.current = controls.speed;
+    pendingSpeedRef.current = controls.speed;
   }, [controls.speed]);
   useEffect(() => {
     previewCallbackRef.current = controls.onSpeedPreview;
   }, [controls.onSpeedPreview]);
   useEffect(() => () => {
+    if (previewFrameRef.current !== null) {
+      cancelAnimationFrame(previewFrameRef.current);
+      previewFrameRef.current = null;
+    }
     // Closing the panel while a pointer gesture is incomplete is a cancel,
-    // so return the compositor animation to the last committed setting.
+    // so return the renderer to the last committed setting.
     previewCallbackRef.current(committedSpeedRef.current);
   }, []);
 
   const previewSpeed = (value: string) => {
     const speed = Number(value);
+    pendingSpeedRef.current = speed;
+    if (previewFrameRef.current !== null) return;
+    previewFrameRef.current = requestAnimationFrame(() => {
+      previewFrameRef.current = null;
+      const pendingSpeed = pendingSpeedRef.current;
+      setDraftSpeed(pendingSpeed);
+      previewCallbackRef.current(pendingSpeed);
+    });
+  };
+  const flushSpeedPreview = (speed: number) => {
+    if (previewFrameRef.current !== null) {
+      cancelAnimationFrame(previewFrameRef.current);
+      previewFrameRef.current = null;
+    }
+    pendingSpeedRef.current = speed;
     setDraftSpeed(speed);
-    controls.onSpeedPreview(speed);
+    previewCallbackRef.current(speed);
   };
   const commitSpeed = (value: string) => {
     const speed = Number(value);
+    flushSpeedPreview(speed);
     if (Math.abs(speed - committedSpeedRef.current) < 0.0001) return;
     committedSpeedRef.current = speed;
     controls.onSpeedCommit(speed);
@@ -541,8 +564,7 @@ function MarqueePanel({ controls, copy }: { controls: MarqueePanelControls; copy
   const cancelSpeed = (input: HTMLInputElement) => {
     const speed = committedSpeedRef.current;
     input.value = String(speed);
-    setDraftSpeed(speed);
-    controls.onSpeedPreview(speed);
+    flushSpeedPreview(speed);
   };
   const directions: Array<{ value: MarqueeDirection; label: string; icon: IconName }> = [
     { value: "left", label: copy.directionLeft, icon: "arrow-left" },
