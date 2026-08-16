@@ -1,10 +1,13 @@
-/* global Animation, Buffer, Element, PerformanceObserver, console, document, getComputedStyle, performance, process, requestAnimationFrame, window */
+/* global Animation, Buffer, CanvasRenderingContext2D, Element, PerformanceObserver, URL, console, document, getComputedStyle, performance, process, requestAnimationFrame, window */
 import { chromium } from "playwright";
 
 // Examples:
 // PERF_DURATION_MS=60000 PERF_REFRESH_HZ=60 PERF_DPR=3 npm run perf:smoke
 // PERF_SCENARIO=max PERF_DIRECTION=up PERF_FLASH=1 npm run perf:smoke
 // PERF_CONTENT='custom text' PERF_VIEWPORT=390x844 PERF_ENFORCE=1 npm run perf:smoke
+// PERF_ENGINE=css PERF_PHASE=steady npm run perf:smoke
+// PERF_ENGINE=canvas PERF_PHASE=speed-drag PERF_DURATION_MS=15000 npm run perf:smoke
+// PERF_ENGINE=waapi PERF_PHASE=resize PERF_RESIZE_VIEWPORT=768x1024 npm run perf:smoke
 const BASE_URL = process.env.PERF_BASE_URL ?? "http://127.0.0.1:4173";
 const CPU_RATE = readPositiveNumber("PERF_CPU_RATE", 6);
 const DURATION_MS = readPositiveNumber("PERF_DURATION_MS", 10_000);
@@ -27,6 +30,23 @@ const ENFORCE_BUDGETS = /^(1|true|yes)$/i.test(
 );
 const VIEWPORT = readViewport(process.env.PERF_VIEWPORT ?? "1024x768");
 const MAX_DROPPED_PERCENT = readPositiveNumber("PERF_MAX_DROPPED_PERCENT", 0.5);
+const MAX_RENDER_SURFACE_WIDTH = 32_768;
+const MAX_RENDER_SURFACE_AREA = 8_000_000;
+const ENGINE = readChoice(
+  "PERF_ENGINE",
+  ["waapi", "css", "canvas"],
+  "waapi",
+);
+const PHASE = readChoice(
+  "PERF_PHASE",
+  ["steady", "speed-drag", "resize"],
+  "steady",
+);
+const RESIZE_VIEWPORT = readViewport(
+  process.env.PERF_RESIZE_VIEWPORT ?? `${VIEWPORT.height}x${VIEWPORT.width}`,
+  "PERF_RESIZE_VIEWPORT",
+);
+const RESIZE_INTERVAL_MS = readPositiveNumber("PERF_RESIZE_INTERVAL_MS", 800);
 
 const TRACE_CATEGORIES = [
   "benchmark",
@@ -70,9 +90,9 @@ function readChoice(name, choices, fallback) {
   return value;
 }
 
-function readViewport(value) {
+function readViewport(value, name = "PERF_VIEWPORT") {
   const match = /^(\d+)x(\d+)$/i.exec(value.trim());
-  if (!match) throw new Error(`PERF_VIEWPORT must look like 1024x768; received ${value}`);
+  if (!match) throw new Error(`${name} must look like 1024x768; received ${value}`);
   return { width: Number(match[1]), height: Number(match[2]) };
 }
 
@@ -97,6 +117,12 @@ function resolveContent() {
     throw new Error(`Performance content has ${codePoints} code points; the application limit is 350.`);
   }
   return content;
+}
+
+function resolveTargetUrl(baseUrl, engine) {
+  const url = new URL(baseUrl);
+  url.searchParams.set("marquee-engine", engine);
+  return url.toString();
 }
 
 function metricMap(result) {
@@ -314,13 +340,93 @@ async function captureElementSnapshot(page, dpr = DPR) {
   }, dpr);
 }
 
+async function captureCanvasSnapshot(page) {
+  return page.evaluate(() => {
+    const canvases = [
+      ...document.querySelectorAll(
+        ".canvas-marquee-surface, .marquee-canvas, canvas[data-testid='canvas-marquee']",
+      ),
+    ];
+    return canvases.map((canvas, index) => {
+      const rect = canvas.getBoundingClientRect();
+      const style = getComputedStyle(canvas);
+      return {
+        index,
+        className: canvas.className,
+        cssPx: {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+        },
+        backingStorePx: {
+          width: canvas.width,
+          height: canvas.height,
+          area: canvas.width * canvas.height,
+        },
+        effectiveScale: {
+          x: rect.width > 0 ? canvas.width / rect.width : null,
+          y: rect.height > 0 ? canvas.height / rect.height : null,
+        },
+        visible: style.display !== "none" && style.visibility !== "hidden",
+      };
+    });
+  });
+}
+
+async function resolveRuntimeEngine(page) {
+  return page.evaluate(() => {
+    const viewport = document.querySelector(".text-viewport[data-marquee-engine]");
+    const declared = viewport?.getAttribute("data-marquee-engine");
+    if (["waapi", "css", "canvas"].includes(declared)) return declared;
+    if (
+      document.querySelector(
+        ".canvas-marquee-host[data-marquee-engine='canvas'], .canvas-marquee-surface, .marquee-canvas, canvas[data-testid='canvas-marquee']",
+      )
+    ) {
+      return "canvas";
+    }
+    if (document.querySelector(".moving-text.uses-css-marquee")) return "css";
+    if (document.querySelectorAll(".marquee-copy").length === 2) return "waapi";
+    return "unknown";
+  });
+}
+
+async function waitForMarqueeRenderer(page, engine) {
+  await page.waitForFunction((requestedEngine) => {
+    const viewport = document.querySelector(".text-viewport[data-marquee-engine]");
+    const declared = viewport?.getAttribute("data-marquee-engine");
+    if (declared && declared !== requestedEngine) return false;
+    if (requestedEngine === "canvas") {
+      return Boolean(
+        document.querySelector(
+          ".canvas-marquee-surface, .marquee-canvas, canvas[data-testid='canvas-marquee']",
+        ),
+      );
+    }
+    if (document.querySelectorAll(".marquee-copy").length !== 2) return false;
+    return requestedEngine !== "css" || Boolean(
+      declared === "css" || document.querySelector(".moving-text.uses-css-marquee"),
+    );
+  }, engine);
+  const actualEngine = await resolveRuntimeEngine(page);
+  if (actualEngine !== engine) {
+    throw new Error(
+      `Requested marquee engine '${engine}', but the page exposed '${actualEngine}'. `
+      + "Ensure ?marquee-engine= is handled and .text-viewport[data-marquee-engine] reflects the active renderer.",
+    );
+  }
+  return actualEngine;
+}
+
 async function resolveMarqueeBackendNodeIds(cdp) {
   try {
     await cdp.send("DOM.enable");
     const { root } = await cdp.send("DOM.getDocument", { depth: 0 });
     const { nodeIds } = await cdp.send("DOM.querySelectorAll", {
       nodeId: root.nodeId,
-      selector: ".marquee-copy",
+      selector:
+        ".marquee-copy, .canvas-marquee-surface, .marquee-canvas, canvas[data-testid='canvas-marquee']",
     });
     const backendNodeIds = [];
     for (const nodeId of nodeIds) {
@@ -407,10 +513,102 @@ function summarizeRafIntervals(intervals) {
   };
 }
 
+async function readRuntimeInstrumentation(page) {
+  return page.evaluate(() => {
+    const state = window.__marqueePerf;
+    return {
+      animateCalls: state.animateCalls.length,
+      updatePlaybackRateCalls: state.updatePlaybackRateCalls.length,
+      longTasks: state.longTasks.length,
+      longTaskEntries: state.longTasks,
+      raf: { ...state.raf },
+      cssAnimationEvents: {
+        counts: { ...state.cssAnimationEvents.counts },
+        samples: state.cssAnimationEvents.samples,
+      },
+      canvasCalls: { ...state.canvasCalls },
+      sliderEvents: { ...state.sliderEvents },
+      resizeEvents: state.resizeEvents,
+      now: performance.now(),
+    };
+  });
+}
+
+function countDelta(before, after, name) {
+  return (after[name] ?? 0) - (before[name] ?? 0);
+}
+
+async function preparePhase(page, phase) {
+  if (phase !== "speed-drag") return null;
+  await page.getByRole("button", { name: /跑馬燈|Marquee/ }).click();
+  const panel = page.locator("#tool-panel-marquee");
+  const slider = panel.getByRole("slider", { name: /速度|Speed/ });
+  await slider.waitFor({ state: "visible" });
+  return slider;
+}
+
+async function exerciseSpeedDrag(page, slider, durationMs) {
+  const box = await slider.boundingBox();
+  if (!box || box.width < 20 || box.height < 1) {
+    throw new Error("Could not resolve a usable marquee speed slider box.");
+  }
+  const minimumX = box.x + Math.min(8, box.width * 0.05);
+  const maximumX = box.x + box.width - Math.min(8, box.width * 0.05);
+  const y = box.y + box.height / 2;
+  const startedAt = Date.now();
+  const travelMs = 1_200;
+  await page.mouse.move(maximumX, y);
+  await page.mouse.down();
+  try {
+    while (Date.now() - startedAt < durationMs) {
+      const elapsed = Date.now() - startedAt;
+      const cycleProgress = (elapsed % (travelMs * 2)) / travelMs;
+      const progress = cycleProgress <= 1 ? cycleProgress : 2 - cycleProgress;
+      await page.mouse.move(
+        maximumX + (minimumX - maximumX) * progress,
+        y,
+      );
+      await page.waitForTimeout(16);
+    }
+  } finally {
+    await page.mouse.up();
+  }
+}
+
+async function exerciseResize(page, durationMs) {
+  const startedAt = Date.now();
+  let useAlternate = true;
+  try {
+    while (Date.now() - startedAt < durationMs) {
+      await page.setViewportSize(useAlternate ? RESIZE_VIEWPORT : VIEWPORT);
+      useAlternate = !useAlternate;
+      const remaining = durationMs - (Date.now() - startedAt);
+      if (remaining > 0) {
+        await page.waitForTimeout(Math.min(RESIZE_INTERVAL_MS, remaining));
+      }
+    }
+  } finally {
+    await page.setViewportSize(VIEWPORT);
+  }
+}
+
+async function exercisePhase(page, phase, durationMs, phaseControl) {
+  if (phase === "speed-drag") {
+    await exerciseSpeedDrag(page, phaseControl, durationMs);
+    return;
+  }
+  if (phase === "resize") {
+    await exerciseResize(page, durationMs);
+    return;
+  }
+  await page.waitForTimeout(durationMs);
+}
+
 const browser = await chromium.launch();
 
 try {
   const content = resolveContent();
+  const targetUrl = resolveTargetUrl(BASE_URL, ENGINE);
   const context = await browser.newContext({
     deviceScaleFactor: DPR,
     viewport: VIEWPORT,
@@ -420,6 +618,34 @@ try {
       animateCalls: [],
       updatePlaybackRateCalls: [],
       longTasks: [],
+      raf: {
+        requests: 0,
+        callbacks: 0,
+        cancels: 0,
+      },
+      cssAnimationEvents: {
+        counts: {
+          animationstart: 0,
+          animationcancel: 0,
+          animationend: 0,
+          animationiteration: 0,
+        },
+        samples: [],
+      },
+      canvasCalls: {
+        clearRect: 0,
+        drawImage: 0,
+        fillText: 0,
+        strokeText: 0,
+      },
+      sliderEvents: {
+        pointerdown: 0,
+        pointermove: 0,
+        pointerup: 0,
+        input: 0,
+        change: 0,
+      },
+      resizeEvents: 0,
     };
     Object.defineProperty(window, "__marqueePerf", {
       configurable: false,
@@ -443,6 +669,73 @@ try {
         return Reflect.apply(originalUpdatePlaybackRate, this, [rate]);
       };
     }
+
+    const originalRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+    const originalCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+    window.requestAnimationFrame = (callback) => {
+      instrumentation.raf.requests += 1;
+      return originalRequestAnimationFrame((timestamp) => {
+        instrumentation.raf.callbacks += 1;
+        callback(timestamp);
+      });
+    };
+    window.cancelAnimationFrame = (handle) => {
+      instrumentation.raf.cancels += 1;
+      return originalCancelAnimationFrame(handle);
+    };
+
+    if (typeof CanvasRenderingContext2D === "function") {
+      for (const method of ["clearRect", "drawImage", "fillText", "strokeText"]) {
+        const original = CanvasRenderingContext2D.prototype[method];
+        if (typeof original !== "function") continue;
+        CanvasRenderingContext2D.prototype[method] = function instrumentedCanvasCall(...args) {
+          instrumentation.canvasCalls[method] += 1;
+          return Reflect.apply(original, this, args);
+        };
+      }
+    }
+
+    const isMarqueeAnimationTarget = (target) =>
+      target instanceof Element && Boolean(
+        target.matches(
+          ".marquee-copy, .moving-text, .canvas-marquee-host, .canvas-marquee-surface, .marquee-canvas",
+        ) || target.closest(
+          ".moving-text.is-marquee, .canvas-marquee-host[data-marquee-engine='canvas']",
+        ),
+      );
+    for (const eventName of [
+      "animationstart",
+      "animationcancel",
+      "animationend",
+      "animationiteration",
+    ]) {
+      window.addEventListener(eventName, (event) => {
+        if (!isMarqueeAnimationTarget(event.target)) return;
+        instrumentation.cssAnimationEvents.counts[eventName] += 1;
+        if (instrumentation.cssAnimationEvents.samples.length < 24) {
+          instrumentation.cssAnimationEvents.samples.push({
+            at: performance.now(),
+            type: eventName,
+            animationName: event.animationName,
+            elapsedTime: event.elapsedTime,
+            className: typeof event.target.className === "string"
+              ? event.target.className
+              : "",
+          });
+        }
+      }, true);
+    }
+
+    for (const eventName of ["pointerdown", "pointermove", "pointerup", "input", "change"]) {
+      window.addEventListener(eventName, (event) => {
+        if (!(event.target instanceof Element)) return;
+        if (!event.target.matches("#marquee-speed-range, input[type='range'][aria-label*='Speed'], input[type='range'][aria-label*='速度']")) return;
+        instrumentation.sliderEvents[eventName] += 1;
+      }, true);
+    }
+    window.addEventListener("resize", () => {
+      instrumentation.resizeEvents += 1;
+    });
 
     if (typeof PerformanceObserver === "function") {
       try {
@@ -473,7 +766,7 @@ try {
     maxTraceBufferUsage = Math.max(maxTraceBufferUsage, percentFull, value);
   });
 
-  await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+  await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
 
   const pwaBanner = page.locator(".pwa-status");
   if (await pwaBanner.isVisible().catch(() => false)) {
@@ -507,7 +800,7 @@ try {
     await morePanel.getByRole("button", { name: /關閉|Close/ }).click();
   }
 
-  await page.waitForFunction(() => document.querySelectorAll(".marquee-copy").length === 2);
+  const actualEngine = await waitForMarqueeRenderer(page, ENGINE);
   await page.waitForTimeout(250);
 
   // Calibrate rAF before tracing. This preserves the old cadence metrics while
@@ -529,15 +822,14 @@ try {
   }, RAF_SAMPLE_MS);
   const rafCalibration = summarizeRafIntervals(rafIntervals);
 
+  const phaseControl = await preparePhase(page, PHASE);
+  await page.waitForTimeout(150);
+
   const beforeElementSnapshot = await captureElementSnapshot(page);
+  const beforeCanvasSnapshot = await captureCanvasSnapshot(page);
   const backendNodeIds = await resolveMarqueeBackendNodeIds(cdp);
   const before = metricMap(await cdp.send("Performance.getMetrics"));
-  const instrumentationBefore = await page.evaluate(() => ({
-    animateCalls: window.__marqueePerf.animateCalls.length,
-    updatePlaybackRateCalls: window.__marqueePerf.updatePlaybackRateCalls.length,
-    longTasks: window.__marqueePerf.longTasks.length,
-    now: performance.now(),
-  }));
+  const instrumentationBefore = await readRuntimeInstrumentation(page);
 
   await cdp.send("Tracing.start", {
     categories: TRACE_CATEGORIES,
@@ -546,21 +838,53 @@ try {
   });
   layerSampler.active = true;
   await page.evaluate(() => performance.mark("marquee-perf-sample-start"));
-  await page.waitForTimeout(DURATION_MS);
+  await exercisePhase(page, PHASE, DURATION_MS, phaseControl);
   await page.evaluate(() => performance.mark("marquee-perf-sample-end"));
   layerSampler.active = false;
   const trace = await stopAndReadTrace(cdp);
 
   const after = metricMap(await cdp.send("Performance.getMetrics"));
   const afterElementSnapshot = await captureElementSnapshot(page);
-  const instrumentationAfter = await page.evaluate(() => ({
-    animateCalls: window.__marqueePerf.animateCalls.length,
-    updatePlaybackRateCalls: window.__marqueePerf.updatePlaybackRateCalls.length,
-    longTasks: window.__marqueePerf.longTasks.length,
-    longTaskEntries: window.__marqueePerf.longTasks,
-  }));
+  const afterCanvasSnapshot = await captureCanvasSnapshot(page);
+  const instrumentationAfter = await readRuntimeInstrumentation(page);
 
   const traceAnalysis = analyzeTrace(trace.events, EXPECTED_REFRESH_RATE_HZ);
+  const cssAnimationEventCounts = Object.fromEntries(
+    Object.keys(instrumentationAfter.cssAnimationEvents.counts).map((name) => [
+      name,
+      countDelta(
+        instrumentationBefore.cssAnimationEvents.counts,
+        instrumentationAfter.cssAnimationEvents.counts,
+        name,
+      ),
+    ]),
+  );
+  const rafInstrumentation = Object.fromEntries(
+    Object.keys(instrumentationAfter.raf).map((name) => [
+      name,
+      countDelta(instrumentationBefore.raf, instrumentationAfter.raf, name),
+    ]),
+  );
+  const canvasCallInstrumentation = Object.fromEntries(
+    Object.keys(instrumentationAfter.canvasCalls).map((name) => [
+      name,
+      countDelta(
+        instrumentationBefore.canvasCalls,
+        instrumentationAfter.canvasCalls,
+        name,
+      ),
+    ]),
+  );
+  const sliderEventInstrumentation = Object.fromEntries(
+    Object.keys(instrumentationAfter.sliderEvents).map((name) => [
+      name,
+      countDelta(
+        instrumentationBefore.sliderEvents,
+        instrumentationAfter.sliderEvents,
+        name,
+      ),
+    ]),
+  );
   const animationInstrumentation = {
     animateCallsDuringSample:
       instrumentationAfter.animateCalls - instrumentationBefore.animateCalls,
@@ -571,6 +895,15 @@ try {
     recentLongTasks: instrumentationAfter.longTaskEntries
       .filter((entry) => entry.at >= instrumentationBefore.now)
       .slice(-20),
+    rafDuringSample: rafInstrumentation,
+    cssAnimationEventsDuringSample: cssAnimationEventCounts,
+    recentCssAnimationEvents: instrumentationAfter.cssAnimationEvents.samples
+      .filter((entry) => entry.at >= instrumentationBefore.now)
+      .slice(-20),
+    canvasCallsDuringSample: canvasCallInstrumentation,
+    sliderEventsDuringSample: sliderEventInstrumentation,
+    resizeEventsDuringSample:
+      instrumentationAfter.resizeEvents - instrumentationBefore.resizeEvents,
   };
   const maxPhysicalWidth = Math.max(
     0,
@@ -580,6 +913,16 @@ try {
     0,
     ...afterElementSnapshot.map((copy) => copy.physicalPx.area),
   );
+  const maxCanvasBackingWidth = Math.max(
+    0,
+    ...afterCanvasSnapshot.map((canvas) => canvas.backingStorePx.width),
+  );
+  const maxCanvasBackingArea = Math.max(
+    0,
+    ...afterCanvasSnapshot.map((canvas) => canvas.backingStorePx.area),
+  );
+  const maxRenderSurfaceWidth = Math.max(maxPhysicalWidth, maxCanvasBackingWidth);
+  const maxRenderSurfaceArea = Math.max(maxPhysicalArea, maxCanvasBackingArea);
   const reportedFrameSlots =
     traceAnalysis.frameSignals.normal
     + (traceAnalysis.frameSignals.partial ?? 0)
@@ -587,22 +930,46 @@ try {
   const droppedPercent = reportedFrameSlots > 0
     ? (traceAnalysis.frameSignals.dropped / reportedFrameSlots) * 100
     : traceAnalysis.frameSignals.inferred.droppedPercent;
+  const steadyPhase = PHASE === "steady";
+  const engineUsesAppRaf = ENGINE === "canvas";
   const acceptance = {
-    droppedFramesAtMostPercent: droppedPercent <= MAX_DROPPED_PERCENT,
+    droppedFramesAtMostPercent:
+      PHASE === "resize" || droppedPercent <= MAX_DROPPED_PERCENT,
     noTwoConsecutiveRefreshSlotsLost:
       traceAnalysis.frameSignals.inferred.maxConsecutiveDroppedSlots < 2,
-    steadyLayoutIsZero: traceAnalysis.rendering.layout.count === 0,
-    steadyPaintIsZero: traceAnalysis.rendering.paint.count === 0,
-    noSteadyAnimationRebuild: animationInstrumentation.animateCallsDuringSample === 0,
-    noSteadyRateController: animationInstrumentation.updatePlaybackRateCallsDuringSample === 0,
-    layerWidthWithinBudget: maxPhysicalWidth <= 16_384,
-    layerAreaWithinBudget: maxPhysicalArea <= 8_000_000,
+    noLongTasks: animationInstrumentation.longTasksDuringSample === 0,
+    renderSurfaceWidthWithinBudget:
+      maxRenderSurfaceWidth <= MAX_RENDER_SURFACE_WIDTH,
+    renderSurfaceAreaWithinBudget:
+      maxRenderSurfaceArea <= MAX_RENDER_SURFACE_AREA,
+    ...(steadyPhase
+      ? {
+          steadyLayoutIsZero: traceAnalysis.rendering.layout.count === 0,
+          steadyPaintMatchesEngine:
+            engineUsesAppRaf || traceAnalysis.rendering.paint.count === 0,
+          noSteadyAnimationRebuild:
+            animationInstrumentation.animateCallsDuringSample === 0
+            && cssAnimationEventCounts.animationstart === 0
+            && cssAnimationEventCounts.animationcancel === 0,
+          noSteadyRateController:
+            animationInstrumentation.updatePlaybackRateCallsDuringSample === 0,
+          steadyRafMatchesEngine: engineUsesAppRaf
+            ? rafInstrumentation.callbacks > 0
+            : rafInstrumentation.callbacks === 0,
+          canvasTextCacheIsStable: ENGINE !== "canvas"
+            || (
+              canvasCallInstrumentation.fillText === 0
+              && canvasCallInstrumentation.strokeText === 0
+            ),
+        }
+      : {}),
   };
   const passed = Object.values(acceptance).every(Boolean);
 
   const result = {
     configuration: {
       baseUrl: BASE_URL,
+      targetUrl,
       cpuRate: CPU_RATE,
       durationMs: DURATION_MS,
       dpr: DPR,
@@ -613,6 +980,11 @@ try {
       direction: DIRECTION,
       requestedSpeed: SPEED,
       flashEnabled: FLASH_ENABLED,
+      requestedEngine: ENGINE,
+      actualEngine,
+      phase: PHASE,
+      resizeViewport: PHASE === "resize" ? RESIZE_VIEWPORT : null,
+      resizeIntervalMs: PHASE === "resize" ? RESIZE_INTERVAL_MS : null,
     },
     rafCalibration: {
       durationMs: RAF_SAMPLE_MS,
@@ -639,12 +1011,17 @@ try {
       after: afterElementSnapshot,
       cdp: summarizeLayerSampler(layerSampler, backendNodeIds),
     },
+    canvas: {
+      before: beforeCanvasSnapshot,
+      after: afterCanvasSnapshot,
+    },
     acceptance: {
       thresholds: {
         maxDroppedPercent: MAX_DROPPED_PERCENT,
         maxConsecutiveDroppedSlots: 1,
-        maxLayerDeviceWidthPx: 16_384,
-        maxLayerDeviceAreaPx: 8_000_000,
+        maxRenderSurfaceDeviceWidthPx: MAX_RENDER_SURFACE_WIDTH,
+        maxRenderSurfaceDeviceAreaPx: MAX_RENDER_SURFACE_AREA,
+        droppedFrameBudgetApplies: PHASE !== "resize",
       },
       observedDroppedPercent: droppedPercent,
       checks: acceptance,

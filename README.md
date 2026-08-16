@@ -69,6 +69,7 @@ npm run dev
 npm run test       # Vitest 單元與元件測試
 npm run test:e2e   # Playwright 瀏覽器測試
 npm run perf:smoke # 對已啟動的 production preview 跑 6x CPU／DPR 2 掉幀診斷
+npm run perf:ab    # 比較 CSS／Canvas 跑馬燈的 production trace 中位數
 npm run build      # TypeScript 檢查與 production build
 npm run check      # ESLint、Vitest、build 與初始 JS 150 KiB gzip 預算
 ```
@@ -87,6 +88,16 @@ npm run preview
 ```
 
 > Service Worker 預設只在 production build 註冊。若要驗證安裝、離線啟動或更新提示，請使用 `npm run build && npm run preview`，不要只使用 dev server。
+
+### 跑馬燈 A/B 實驗
+
+實驗分支保留 WAAPI 正式基準，並提供兩個不影響資料 schema 的 runtime renderer：
+
+- `/?marquee-engine=css`：兩個 DOM copy 的 CSS `translate3d` animation；穩態零應用程式 rAF。
+- `/?marquee-engine=canvas`：viewport Canvas 2D、離屏文字快取與 timestamp-based rAF。
+- `/?marquee-lab=1&marquee-engine=css`：顯示實驗切換器，可在不重新載入頁面的情況下切換 WAAPI、CSS 與 Canvas。
+
+未帶 query 或值無效時仍使用既有 WAAPI。完整 production 測試矩陣、實機步驟與選擇門檻請見 [`docs/marquee-engine-ab.md`](./docs/marquee-engine-ab.md)。
 
 ## 專案結構
 
