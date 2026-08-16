@@ -27,6 +27,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview:clean": "vite preview --outDir dist/experiments/marquee-clean",
+    "preview:probe": "vite preview --outDir dist/experiments/marquee-motion-probe",
     "check:bundle": "node scripts/check-bundle-size.mjs",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings=0",

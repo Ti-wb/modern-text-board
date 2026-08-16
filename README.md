@@ -112,6 +112,17 @@ npm run preview:clean -- --host 0.0.0.0 --port 4175 --strictPort
 
 接著開啟 `http://localhost:4175/?speed=40&direction=left`。文字、速度、方向、字級與間距均透過 query parameter 固定；完整參數與實機比較方式請見 [`docs/marquee-clean-fixture.md`](./docs/marquee-clean-fixture.md)。此頁刻意沒有 resize／orientation listener，旋轉裝置後需重新載入，以免 viewport 事件污染基準。
 
+### 掉幀層級診斷頁
+
+`/experiments/marquee-motion-probe/` 使用兩個同步 CSS transform layer：上軌是同一 layer 內的藍色方塊與文字，下軌只有相同藍色方塊。加上 `?raster=1` 會再插入一條「文字先繪成 Canvas 點陣圖」的同步軌道；Canvas 只在啟動時繪製一次，播放期間仍沒有應用程式 frame loop。
+
+```bash
+npm run build
+npm run preview:probe -- --host 0.0.0.0 --port 4176 --strictPort
+```
+
+預設頁面不顯示說明、格線或其他 overlay；加入 `?labels=1` 才顯示判讀提示。完整實機程序與參數請見 [`docs/marquee-motion-probe.md`](./docs/marquee-motion-probe.md)。
+
 ## 專案結構
 
 - `src/components/`：畫布、工具列、面板、編輯器、QR、頁面與通知 UI。

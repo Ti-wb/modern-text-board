@@ -34,7 +34,7 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         navigateFallback: null,
         globPatterns: ["**/*.{js,css,html,svg,png,webmanifest}"],
-        globIgnores: ["experiments/marquee-clean/**"]
+        globIgnores: ["experiments/**"]
       }
     })
   ],

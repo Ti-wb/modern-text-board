@@ -22,3 +22,6 @@
 
 /experiments/marquee-clean/*
   Cache-Control: no-store
+
+/experiments/marquee-motion-probe/*
+  Cache-Control: no-store

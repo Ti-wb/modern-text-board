@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-Hant" data-motion-probe-state="booting">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Marquee Motion Probe</title>
+    <link rel="stylesheet" href="./motion-probe.css" />
+  </head>
+  <body>
+    <main
+      aria-describedby="motion-probe-description"
+      class="motion-probe labels-hidden"
+      data-motion-probe-engine="css"
+      data-probe-mode="alternate"
+      id="motion-probe"
+    >
+      <header class="motion-probe__header">
+        <div>
+          <strong>Motion Probe</strong>
+          <span class="motion-probe__metrics">
+            <span data-probe-metric="speed">—</span>
+            <span aria-hidden="true">·</span>
+            <span data-probe-metric="mode">—</span>
+            <span aria-hidden="true">·</span>
+            <span data-probe-metric="duration">—</span>
+          </span>
+        </div>
+        <p>端點反向是預期行為；請觀察各軌道中段是否同時停頓。</p>
+      </header>
+
+      <div aria-hidden="true" class="motion-probe__stage">
+        <section class="probe-lane" data-probe-lane="text">
+          <span class="probe-lane__label">
+            DOM TEXT + BLUE BLOCK · LIVE GLYPH LAYER
+          </span>
+          <div
+            class="probe-runner probe-runner--text"
+            data-probe-runner="text"
+          >
+            <span class="probe-runner__marker"></span>
+            <span class="probe-runner__text" data-probe-text></span>
+          </div>
+        </section>
+
+        <section class="probe-lane" data-probe-lane="block">
+          <span class="probe-lane__label">
+            BLUE BLOCK ONLY · MINIMAL LAYER
+          </span>
+          <div
+            class="probe-runner probe-runner--block"
+            data-probe-runner="block"
+          >
+            <span class="probe-runner__marker"></span>
+          </div>
+        </section>
+      </div>
+
+      <footer class="motion-probe__footer">
+        全部同時停＝presentation／compositor；只有字緣抖＝glyph sampling。
+      </footer>
+
+      <p class="motion-probe__semantic" id="motion-probe-description">
+        同步移動的文字與實心圖形診斷頁。
+      </p>
+      <noscript>JavaScript is required once to measure the probe geometry.</noscript>
+    </main>
+
+    <template id="raster-lane-template">
+      <section class="probe-lane" data-probe-lane="raster">
+        <span class="probe-lane__label">
+          RASTERIZED TEXT + BLUE BLOCK · STATIC BITMAP LAYER
+        </span>
+        <div
+          class="probe-runner probe-runner--raster"
+          data-probe-runner="raster"
+        >
+          <span class="probe-runner__marker"></span>
+          <canvas
+            aria-hidden="true"
+            class="probe-runner__raster"
+            data-probe-raster
+          ></canvas>
+        </div>
+      </section>
+    </template>
+    <script defer src="./motion-probe.js"></script>
+  </body>
+</html>
