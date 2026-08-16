@@ -96,13 +96,14 @@ npm run preview
 
 ### 跑馬燈 A/B 實驗
 
-實驗分支保留 WAAPI 正式基準，並提供兩個不影響資料 schema 的 runtime renderer：
+實驗分支保留 WAAPI 正式基準，並提供三個不影響資料 schema 的 runtime renderer：
 
 - `/?marquee-engine=css`：兩個 DOM copy 的 CSS `translate3d` animation；穩態零應用程式 rAF。
 - `/?marquee-engine=canvas`：viewport Canvas 2D、離屏文字快取與 timestamp-based rAF。
-- `/?marquee-lab=1&marquee-engine=css`：顯示實驗切換器，可在不重新載入頁面的情況下切換 WAAPI、CSS 與 Canvas。
+- `/?marquee-engine=worker`：文字只點陣化一次，Dedicated Worker 以 OffscreenCanvas WebGL 產生每幀；高速時有輕微方向性 trail，可加 `&marquee-blur=0` 關閉比較。
+- `/?marquee-lab=1&marquee-engine=worker`：顯示實驗切換器，可在不重新載入頁面的情況下切換四種引擎。
 
-未帶 query 或值無效時仍使用既有 WAAPI。完整 production 測試矩陣、實機步驟與選擇門檻請見 [`docs/marquee-engine-ab.md`](./docs/marquee-engine-ab.md)。
+未帶 query 或值無效時仍使用既有 WAAPI。Worker WebGL 不可用時會自動降級為 Canvas 2D。完整 production 測試矩陣、實機步驟與選擇門檻請見 [`docs/marquee-engine-ab.md`](./docs/marquee-engine-ab.md)。
 
 ### 完全隔離的跑馬燈基準頁
 

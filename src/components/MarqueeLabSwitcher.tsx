@@ -9,6 +9,7 @@ const ENGINES: Array<{ value: MarqueeEngineKind; label: string }> = [
   { value: "waapi", label: "WAAPI baseline" },
   { value: "css", label: "CSS Animation" },
   { value: "canvas", label: "Canvas 2D" },
+  { value: "worker", label: "Worker WebGL" },
 ];
 
 export function MarqueeLabSwitcher({

@@ -12,6 +12,7 @@ import {
 import type { MarqueeEngineKind } from "../marquee/engine";
 import { CanvasMarquee } from "./CanvasMarquee";
 import { QrDisplay } from "./QrDisplay";
+import { WorkerMarquee } from "./WorkerMarquee";
 
 interface BoardCanvasProps {
   devicePixelRatio: number;
@@ -72,6 +73,7 @@ function BoardCanvasView({
     (page.marquee.direction === "left" || page.marquee.direction === "right");
   const verticalMarquee = page.marquee.enabled && !horizontalMarquee;
   const canvasMarquee = page.marquee.enabled && marqueeEngine === "canvas";
+  const workerMarquee = page.marquee.enabled && marqueeEngine === "worker";
   const mode = !page.marquee.enabled
     ? "static"
     : horizontalMarquee ? "horizontal" : "vertical";
@@ -223,23 +225,43 @@ function BoardCanvasView({
           >
             {displayText}
           </span>
-          {canvasMarquee && !marqueeBudgetExceeded ? (
+          {(canvasMarquee || workerMarquee) && !marqueeBudgetExceeded ? (
             <>
-              <CanvasMarquee
-                animationKey={page.id}
-                color={textColor}
-                controllerRef={marqueeControllerRef}
-                direction={page.marquee.direction}
-                flashEnabled={page.flashEnabled}
-                fontFamily={page.fontFamily}
-                fontSize={fontSize}
-                fontWeight={page.fontWeight}
-                mirrored={page.mirrored}
-                paused={paused}
-                speed={page.marquee.speed}
-                text={displayText}
-                textAlign={page.textAlign}
-              />
+              {workerMarquee ? (
+                <WorkerMarquee
+                  animationKey={page.id}
+                  color={textColor}
+                  controllerRef={marqueeControllerRef}
+                  devicePixelRatio={devicePixelRatio}
+                  direction={page.marquee.direction}
+                  flashEnabled={page.flashEnabled}
+                  fontFamily={page.fontFamily}
+                  fontSize={fontSize}
+                  fontWeight={page.fontWeight}
+                  mirrored={page.mirrored}
+                  paused={paused}
+                  refreshRateHz={displayCadence.refreshRateHz}
+                  speed={page.marquee.speed}
+                  text={displayText}
+                  textAlign={page.textAlign}
+                />
+              ) : (
+                <CanvasMarquee
+                  animationKey={page.id}
+                  color={textColor}
+                  controllerRef={marqueeControllerRef}
+                  direction={page.marquee.direction}
+                  flashEnabled={page.flashEnabled}
+                  fontFamily={page.fontFamily}
+                  fontSize={fontSize}
+                  fontWeight={page.fontWeight}
+                  mirrored={page.mirrored}
+                  paused={paused}
+                  speed={page.marquee.speed}
+                  text={displayText}
+                  textAlign={page.textAlign}
+                />
+              )}
               <p class="sr-only">{displayText}</p>
             </>
           ) : (

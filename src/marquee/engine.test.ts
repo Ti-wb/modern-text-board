@@ -16,6 +16,10 @@ describe("marquee engine selection", () => {
     expect(resolveMarqueeEngine("?marquee-engine=canvas")).toBe("canvas");
   });
 
+  it("selects the worker renderer only through an explicit query", () => {
+    expect(resolveMarqueeEngine("?marquee-engine=worker")).toBe("worker");
+  });
+
   it("shows the lab switcher only when explicitly requested", () => {
     expect(isMarqueeLabVisible("?marquee-engine=css")).toBe(false);
     expect(isMarqueeLabVisible("?marquee-lab=1&marquee-engine=css")).toBe(true);

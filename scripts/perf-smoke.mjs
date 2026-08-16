@@ -38,7 +38,7 @@ const MAX_RENDER_SURFACE_WIDTH = 32_768;
 const MAX_RENDER_SURFACE_AREA = 8_000_000;
 const ENGINE = readChoice(
   "PERF_ENGINE",
-  ["waapi", "css", "canvas"],
+  ["waapi", "css", "canvas", "worker"],
   "waapi",
 );
 const PHASE = readChoice(
@@ -424,7 +424,7 @@ async function captureCanvasSnapshot(page) {
   return page.evaluate(() => {
     const canvases = [
       ...document.querySelectorAll(
-        ".canvas-marquee-surface, .marquee-canvas, canvas[data-testid='canvas-marquee']",
+        ".canvas-marquee-surface, .worker-marquee-surface, .marquee-canvas, canvas[data-testid='canvas-marquee'], canvas[data-testid='worker-marquee']",
       ),
     ];
     return canvases.map((canvas, index) => {
@@ -458,7 +458,14 @@ async function resolveRuntimeEngine(page) {
   return page.evaluate(() => {
     const viewport = document.querySelector(".text-viewport[data-marquee-engine]");
     const declared = viewport?.getAttribute("data-marquee-engine");
-    if (["waapi", "css", "canvas"].includes(declared)) return declared;
+    if (["waapi", "css", "canvas", "worker"].includes(declared)) return declared;
+    if (
+      document.querySelector(
+        ".worker-marquee-host[data-marquee-engine='worker'], .worker-marquee-surface, canvas[data-testid='worker-marquee']",
+      )
+    ) {
+      return "worker";
+    }
     if (
       document.querySelector(
         ".canvas-marquee-host[data-marquee-engine='canvas'], .canvas-marquee-surface, .marquee-canvas, canvas[data-testid='canvas-marquee']",
@@ -477,10 +484,12 @@ async function waitForMarqueeRenderer(page, engine) {
     const viewport = document.querySelector(".text-viewport[data-marquee-engine]");
     const declared = viewport?.getAttribute("data-marquee-engine");
     if (declared && declared !== requestedEngine) return false;
-    if (requestedEngine === "canvas") {
+    if (requestedEngine === "canvas" || requestedEngine === "worker") {
       return Boolean(
         document.querySelector(
-          ".canvas-marquee-surface, .marquee-canvas, canvas[data-testid='canvas-marquee']",
+          requestedEngine === "worker"
+            ? ".worker-marquee-surface, canvas[data-testid='worker-marquee']"
+            : ".canvas-marquee-surface, .marquee-canvas, canvas[data-testid='canvas-marquee']",
         ),
       );
     }
@@ -506,7 +515,7 @@ async function resolveMarqueeBackendNodeIds(cdp) {
     const { nodeIds } = await cdp.send("DOM.querySelectorAll", {
       nodeId: root.nodeId,
       selector:
-        ".marquee-copy, .canvas-marquee-surface, .marquee-canvas, canvas[data-testid='canvas-marquee']",
+        ".marquee-copy, .canvas-marquee-surface, .worker-marquee-surface, .marquee-canvas, canvas[data-testid='canvas-marquee'], canvas[data-testid='worker-marquee']",
     });
     const backendNodeIds = [];
     for (const nodeId of nodeIds) {
@@ -778,7 +787,7 @@ try {
     const isMarqueeAnimationTarget = (target) =>
       target instanceof Element && Boolean(
         target.matches(
-          ".marquee-copy, .moving-text, .canvas-marquee-host, .canvas-marquee-surface, .marquee-canvas",
+          ".marquee-copy, .moving-text, .canvas-marquee-host, .canvas-marquee-surface, .worker-marquee-host, .worker-marquee-surface, .marquee-canvas",
         ) || target.closest(
           ".moving-text.is-marquee, .canvas-marquee-host[data-marquee-engine='canvas']",
         ),
@@ -1090,7 +1099,7 @@ try {
           steadyRafMatchesEngine: engineUsesAppRaf
             ? rafInstrumentation.callbacks > 0
             : rafInstrumentation.callbacks === 0,
-          canvasTextCacheIsStable: ENGINE !== "canvas"
+          canvasTextCacheIsStable: !["canvas", "worker"].includes(ENGINE)
             || (
               canvasCallInstrumentation.fillText === 0
               && canvasCallInstrumentation.strokeText === 0

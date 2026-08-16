@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 // Examples:
 // PERF_ENGINES=css,canvas PERF_REPEATS=3 node scripts/perf-ab.mjs
 // PERF_ENGINES=waapi,css,canvas PERF_PHASES=steady,speed-drag,resize PERF_DURATION_MS=60000 node scripts/perf-ab.mjs
-const VALID_ENGINES = ["waapi", "css", "canvas"];
+const VALID_ENGINES = ["waapi", "css", "canvas", "worker"];
 const VALID_PHASES = ["steady", "speed-drag", "resize"];
 const smokeScript = fileURLToPath(new URL("./perf-smoke.mjs", import.meta.url));
 const engines = readChoices(

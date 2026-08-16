@@ -1,14 +1,16 @@
 # Marquee Engine A/B Validation
 
-此文件記錄 CSS Animation 與 HTML Canvas 2D 跑馬燈候選的測試方式。實驗完成前，沒有 query parameter 的正式行為仍使用 WAAPI。
+此文件記錄 CSS Animation、HTML Canvas 2D 與 Worker OffscreenCanvas 跑馬燈候選的測試方式。實驗完成前，沒有 query parameter 的正式行為仍使用 WAAPI。
 
 ## Production 測試網址
 
 - CSS：`/?marquee-engine=css`
 - Canvas：`/?marquee-engine=canvas`
-- 保留狀態切換：`/?marquee-lab=1&marquee-engine=css`
+- Worker WebGL：`/?marquee-engine=worker`
+- Worker WebGL 不使用方向性 trail：`/?marquee-engine=worker&marquee-blur=0`
+- 保留狀態切換：`/?marquee-lab=1&marquee-engine=worker`
 
-直接網址不顯示測量 overlay。只有加入 `marquee-lab=1` 才會顯示 WAAPI／CSS／Canvas 切換器。
+直接網址不顯示測量 overlay。只有加入 `marquee-lab=1` 才會顯示四種引擎的切換器。
 
 ## 引擎差異
 
@@ -16,6 +18,7 @@
 | --- | --- | --- |
 | CSS Animation | 瀏覽器 compositor 執行兩個 `translate3d` copy，應用程式 rAF 為零 | 長文字仍會建立較寬的文字 layer |
 | Canvas 2D | 每個 display frame 清除 viewport canvas，再繪製兩次快取 bitmap | main thread 每幀執行 rAF 與 canvas draw |
+| Worker WebGL | main thread 只建立 `ImageBitmap`；Worker rAF 以兩個 texture quad 合成，高速時增加少量 trail samples | 仍受瀏覽器 compositor／OS presentation 約束；不支援 WebGL 時降級為 Worker 2D，整個 OffscreenCanvas 不可用時降級為 main-thread Canvas |
 | WAAPI baseline | 既有兩個 compositor animation | 僅作基準，驗證期間不更改正式預設 |
 
 Canvas backing store 最多 8,000,000 pixels；文字 bitmap 只在內容、字型、顏色、方向、鏡像或 viewport 改變時重建。CSS 版只有在設定或尺寸改變時執行 JavaScript，固定速度播放期間不執行應用程式 frame loop。
@@ -34,12 +37,13 @@ npm run preview
 ```bash
 PERF_ENGINE=css PERF_PHASE=steady PERF_DURATION_MS=60000 npm run perf:smoke
 PERF_ENGINE=canvas PERF_PHASE=speed-drag PERF_DURATION_MS=60000 npm run perf:smoke
+PERF_ENGINE=worker PERF_PHASE=steady PERF_DURATION_MS=60000 npm run perf:smoke
 ```
 
 三階段、各三次並取中位數：
 
 ```bash
-PERF_ENGINES=css,canvas \
+PERF_ENGINES=css,canvas,worker \
 PERF_PHASES=steady,speed-drag,resize \
 PERF_REPEATS=3 \
 PERF_DURATION_MS=60000 \

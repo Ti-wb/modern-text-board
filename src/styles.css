@@ -366,7 +366,23 @@ html[data-presentation="true"] .page-indicator {
 
 .marquee-lab-options {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
+}
+
+.worker-marquee-host {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.worker-marquee-surface {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .marquee-lab-options button {
