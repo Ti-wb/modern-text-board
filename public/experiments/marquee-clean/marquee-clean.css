@@ -1,0 +1,123 @@
+:root {
+  --clean-background: #fafafc;
+  --clean-color: #1a1a1e;
+  --clean-duration: 10s;
+  --clean-font-size: 80px;
+  --clean-font-weight: 900;
+  --clean-start-x: 0px;
+  --clean-start-y: 0px;
+  --clean-end-x: 0px;
+  --clean-end-y: 0px;
+  color-scheme: light dark;
+  background: var(--clean-background);
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--clean-background);
+}
+
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  overscroll-behavior: none;
+}
+
+.clean-marquee {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  contain: strict;
+  color: var(--clean-color);
+  background: var(--clean-background);
+}
+
+.clean-marquee__copy {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: none;
+  contain: layout style;
+  visibility: hidden;
+  animation-name: clean-marquee-motion;
+  animation-duration: var(--clean-duration);
+  animation-delay: var(--clean-delay, 0ms);
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  animation-play-state: paused;
+  will-change: transform;
+}
+
+.clean-marquee.is-ready .clean-marquee__copy {
+  visibility: visible;
+  animation-play-state: running;
+}
+
+.clean-marquee__text {
+  display: block;
+  margin: 0;
+  padding: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang TC", "Microsoft JhengHei", sans-serif;
+  font-size: var(--clean-font-size);
+  font-weight: var(--clean-font-weight);
+  line-height: 1.06;
+  text-align: center;
+  white-space: pre;
+}
+
+.clean-marquee.is-vertical .clean-marquee__copy {
+  width: 100%;
+}
+
+.clean-marquee.is-vertical .clean-marquee__text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.clean-marquee__semantic {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  border: 0;
+  white-space: nowrap;
+}
+
+noscript {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  width: min(32rem, calc(100% - 3rem));
+  color: var(--clean-color);
+  font: 600 16px/1.5 system-ui, sans-serif;
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+
+@keyframes clean-marquee-motion {
+  from {
+    transform: translate3d(
+      var(--clean-start-x),
+      var(--clean-start-y),
+      0
+    );
+  }
+
+  to {
+    transform: translate3d(
+      var(--clean-end-x),
+      var(--clean-end-y),
+      0
+    );
+  }
+}

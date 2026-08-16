@@ -99,6 +99,19 @@ npm run preview
 
 未帶 query 或值無效時仍使用既有 WAAPI。完整 production 測試矩陣、實機步驟與選擇門檻請見 [`docs/marquee-engine-ab.md`](./docs/marquee-engine-ab.md)。
 
+### 完全隔離的跑馬燈基準頁
+
+`/experiments/marquee-clean/` 是不載入 Preact、正式 App、PWA、工具列、QR、儲存、auto-fit 或任何持續 JavaScript loop 的靜態基準頁。JavaScript 只在字型就緒後量測一次尺寸；穩態播放完全交給兩份文字的原生 CSS Animation。
+
+要避免正式站台既有的 root-scope Service Worker 介入，請用獨立 production origin 啟動：
+
+```bash
+npm run build
+npm run preview:clean -- --host 0.0.0.0 --port 4175 --strictPort
+```
+
+接著開啟 `http://localhost:4175/?speed=40&direction=left`。文字、速度、方向、字級與間距均透過 query parameter 固定；完整參數與實機比較方式請見 [`docs/marquee-clean-fixture.md`](./docs/marquee-clean-fixture.md)。此頁刻意沒有 resize／orientation listener，旋轉裝置後需重新載入，以免 viewport 事件污染基準。
+
 ## 專案結構
 
 - `src/components/`：畫布、工具列、面板、編輯器、QR、頁面與通知 UI。
