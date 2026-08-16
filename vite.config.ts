@@ -44,6 +44,9 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
     css: true
   },
+  preview: {
+    allowedHosts: [".trycloudflare.com"]
+  },
   build: {
     target: "es2022",
     sourcemap: true
