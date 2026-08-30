@@ -12,6 +12,7 @@ function renderCanvas(overrides = {}) {
   };
   const handlers = {
     onEdit: vi.fn(),
+    onFontLoadError: vi.fn(),
     onNext: vi.fn(),
     onPrevious: vi.fn(),
     onFitChange: vi.fn()
@@ -93,6 +94,7 @@ describe("BoardCanvas", () => {
         marqueeControllerRef={{ current: null }}
         marqueeEngine="waapi"
         onEdit={vi.fn()}
+        onFontLoadError={vi.fn()}
         onFitChange={vi.fn()}
         onNext={vi.fn()}
         onPrevious={vi.fn()}

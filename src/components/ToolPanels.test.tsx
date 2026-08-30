@@ -1,7 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { describe, expect, it, vi } from "vitest";
 
-import { ToolPanels, type ToolPanelsProps } from "./ToolPanels";
+import {
+  ToolPanels,
+  type FontPanelControls,
+  type ToolPanelsProps,
+} from "./ToolPanels";
 
 function dispatchEscape(
   target: EventTarget,
@@ -23,10 +27,14 @@ function renderPanel(
   onFontScaleChange = vi.fn(),
   onMarqueeSpeedPreview = vi.fn(),
   onMarqueeSpeedCommit = vi.fn(),
+  options: {
+    font?: Partial<FontPanelControls>;
+    locale?: ToolPanelsProps["locale"];
+  } = {},
 ) {
   const noop = () => undefined;
   const props: ToolPanelsProps = {
-    locale: "en",
+    locale: options.locale ?? "en",
     kind,
     edge: "bottom",
     offsetRatio: 0.5,
@@ -39,10 +47,23 @@ function renderPanel(
       maxFittingFontSizePx: 320,
       effectiveFontSizePx: 80,
       fontWeight: 900,
+      fontLoadStates: {
+        "web-noto-sans-tc": "idle",
+        "web-noto-serif-tc": "idle",
+        "web-lxgw-wenkai-tc": "idle",
+        "web-iansui": "idle",
+        "web-wdxl-lubrifont-tc": "idle",
+        "web-lato": "idle",
+        "web-inter": "idle",
+        "web-montserrat": "idle",
+        "web-merriweather": "idle",
+      },
+      online: true,
       fitOverflow: false,
       onFontFamilyChange: noop,
       onFontScaleChange,
       onFontWeightChange: noop,
+      ...options.font,
     },
     color: {
       textColor: "auto",
@@ -110,6 +131,82 @@ describe("ToolPanels keyboard dismissal", () => {
 
     fireEvent.input(slider, { target: { value: "100" } });
     expect(onFontScaleChange).toHaveBeenCalledWith(100);
+  });
+
+  it("shows localized system and web font tabs and requests a web font", () => {
+    const onFontFamilyChange = vi.fn();
+    renderPanel(
+      vi.fn(),
+      "font",
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      { font: { onFontFamilyChange }, locale: "zh-TW" },
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Web Fonts" }));
+    expect(screen.getByText("繁中文字型")).toBeTruthy();
+    expect(screen.getByText("歐文字型")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /Iansui.*載入/ }));
+    expect(onFontFamilyChange).toHaveBeenCalledWith("web-iansui");
+  });
+
+  it("announces load state, previews ready fonts, and disables unavailable weights", () => {
+    renderPanel(
+      vi.fn(),
+      "font",
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      {
+        font: {
+          fontFamily: "web-iansui",
+          fontWeight: 400,
+          fontLoadStates: {
+            "web-noto-sans-tc": "loading",
+            "web-noto-serif-tc": "idle",
+            "web-lxgw-wenkai-tc": "idle",
+            "web-iansui": "ready",
+            "web-wdxl-lubrifont-tc": "error",
+            "web-lato": "idle",
+            "web-inter": "idle",
+            "web-montserrat": "idle",
+            "web-merriweather": "idle",
+          },
+        },
+      },
+    );
+
+    const loading = screen.getByRole("button", {
+      name: /Noto Sans TC.*Loading/,
+    });
+    expect((loading as HTMLButtonElement).disabled).toBe(true);
+    expect(loading.getAttribute("aria-busy")).toBe("true");
+    expect(screen.getByText("Retry")).toBeTruthy();
+
+    const sample = screen.getByText("手舉牌 Aa");
+    expect(sample.getAttribute("style")).toContain("Iansui");
+    expect((screen.getByRole("button", { name: "Light" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Regular" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "Bold" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Black" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("explains the safe fallback while offline", () => {
+    renderPanel(
+      vi.fn(),
+      "font",
+      vi.fn(),
+      vi.fn(),
+      vi.fn(),
+      { font: { online: false } },
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Web Fonts" }));
+
+    expect(
+      screen.getByRole("status").textContent,
+    ).toContain("Only previously cached fonts and glyphs");
   });
 
   it("coalesces high-range marquee previews to one display-frame update", async () => {

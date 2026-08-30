@@ -2,11 +2,26 @@ export type Locale = "zh-TW" | "en";
 
 export type Theme = "light" | "dark";
 
-export type FontFamily =
+export type SystemFontFamily =
   | "system-sans"
   | "system-rounded"
   | "system-serif"
   | "system-mono";
+
+export type WebFontFamily =
+  | "web-noto-sans-tc"
+  | "web-noto-serif-tc"
+  | "web-lxgw-wenkai-tc"
+  | "web-iansui"
+  | "web-wdxl-lubrifont-tc"
+  | "web-lato"
+  | "web-inter"
+  | "web-montserrat"
+  | "web-merriweather";
+
+export type FontFamily = SystemFontFamily | WebFontFamily;
+
+export type FontLoadState = "idle" | "loading" | "ready" | "error";
 
 export type FontWeight = 300 | 400 | 700 | 900;
 
@@ -79,6 +94,12 @@ export type WorkspaceAction =
   | { type: "page/set-theme"; pageId: string; theme: Theme }
   | { type: "page/set-text-color"; pageId: string; color: "auto" | string }
   | { type: "page/set-font-family"; pageId: string; fontFamily: FontFamily }
+  | {
+      type: "page/set-typography";
+      pageId: string;
+      fontFamily: FontFamily;
+      fontWeight: FontWeight;
+    }
   | { type: "page/set-font-size"; pageId: string; sizePx: number }
   | { type: "page/set-font-scale"; pageId: string; percent: number }
   | { type: "page/set-font-weight"; pageId: string; fontWeight: FontWeight }

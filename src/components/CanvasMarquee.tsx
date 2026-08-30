@@ -20,6 +20,7 @@ export interface CanvasMarqueeProps {
   direction: MarqueeDirection;
   flashEnabled: boolean;
   fontFamily: FontFamily;
+  fontRevision: number;
   fontSize: number;
   fontWeight: FontWeight;
   mirrored: boolean;
@@ -41,6 +42,7 @@ export function CanvasMarquee({
   direction,
   flashEnabled,
   fontFamily,
+  fontRevision,
   fontSize,
   fontWeight,
   mirrored,
@@ -59,6 +61,7 @@ export function CanvasMarquee({
     controllerRef,
     direction,
     fontFamily,
+    fontRevision,
     fontSize,
     fontWeight,
     hostRef,

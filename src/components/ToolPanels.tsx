@@ -7,12 +7,22 @@ import {
 } from "../hooks/useMarqueeMotion";
 import type {
   FontFamily,
+  FontLoadState,
   FontWeight,
   Locale,
   MarqueeDirection,
+  SystemFontFamily,
   TextAlign,
   ToolbarEdge,
+  WebFontFamily,
 } from "../domain/types";
+import {
+  FONT_CATALOG,
+  WEB_FONT_FAMILIES,
+  isWebFontFamily,
+  resolveFontStack,
+  supportsFontWeight,
+} from "../fonts/catalog";
 import { Icon, type IconName } from "./Icon";
 import type { ToolPanelKind } from "./Toolbar";
 
@@ -24,6 +34,8 @@ export interface FontPanelControls {
   maxFittingFontSizePx: number;
   effectiveFontSizePx: number;
   fontWeight: FontWeight;
+  fontLoadStates: Readonly<Record<WebFontFamily, FontLoadState>>;
+  online: boolean;
   fitOverflow: boolean;
   onFontFamilyChange: (fontFamily: FontFamily) => void;
   onFontScaleChange: (percent: number) => void;
@@ -88,7 +100,19 @@ const COPY = {
   "zh-TW": {
     close: "關閉",
     fontTitle: "字型與字級",
-    fontFamily: "系統字型",
+    fontFamily: "字型",
+    systemFonts: "系統字型",
+    webFonts: "Web Fonts",
+    traditionalChineseFonts: "繁中文字型",
+    latinFonts: "歐文字型",
+    webFontHint: "點選後才會從本站載入；曾使用的字形可能可離線使用。",
+    offlineFontHint: "目前離線。只有先前已快取的字型與字形能載入，其餘內容會安全改用系統字型。",
+    fontErrorHint: "無法載入這個字型。未快取的字型在離線時不可用，請連線後重試。",
+    loadFont: "載入",
+    loadingFont: "載入中",
+    loadedFont: "已載入",
+    retryFont: "重試",
+    unavailableWeight: "此字型未提供這個字重",
     fontSize: "畫面填滿程度",
     configured: "填滿",
     effective: "實際顯示",
@@ -148,7 +172,19 @@ const COPY = {
   en: {
     close: "Close",
     fontTitle: "Font & size",
-    fontFamily: "System font",
+    fontFamily: "Font family",
+    systemFonts: "System fonts",
+    webFonts: "Web Fonts",
+    traditionalChineseFonts: "Traditional Chinese",
+    latinFonts: "Latin fonts",
+    webFontHint: "Loaded from this site only when selected. Previously used glyphs may work offline.",
+    offlineFontHint: "You are offline. Only previously cached fonts and glyphs can load; other content safely uses a system font.",
+    fontErrorHint: "This font could not load. Uncached fonts are unavailable offline; reconnect and retry.",
+    loadFont: "Load",
+    loadingFont: "Loading",
+    loadedFont: "Loaded",
+    retryFont: "Retry",
+    unavailableWeight: "This weight is not available for the selected font",
     fontSize: "Screen fill",
     configured: "Fill",
     effective: "Displayed",
@@ -209,7 +245,7 @@ const COPY = {
 
 type Copy = (typeof COPY)[Locale];
 
-const FONT_OPTIONS: Array<{ value: FontFamily; label: keyof Pick<Copy, "sans" | "rounded" | "serif" | "mono"> }> = [
+const FONT_OPTIONS: Array<{ value: SystemFontFamily; label: keyof Pick<Copy, "sans" | "rounded" | "serif" | "mono"> }> = [
   { value: "system-sans", label: "sans" },
   { value: "system-rounded", label: "rounded" },
   { value: "system-serif", label: "serif" },
@@ -334,6 +370,9 @@ function PanelFrame({
 }
 
 function FontPanel({ controls, copy }: { controls: FontPanelControls; copy: Copy }) {
+  const [fontTab, setFontTab] = useState<"system" | "web">(
+    isWebFontFamily(controls.fontFamily) ? "web" : "system",
+  );
   const derivedPercent = clamp(
     Math.round(
       (controls.legacyMaxFontSizePx /
@@ -344,28 +383,145 @@ function FontPanel({ controls, copy }: { controls: FontPanelControls; copy: Copy
     LIMITS.maxFontScalePercent,
   );
   const scalePercent = controls.fontScalePercent ?? derivedPercent;
-
-  return (
+  const fontLoadFailed = WEB_FONT_FAMILIES.some(
+    (fontFamily) => controls.fontLoadStates[fontFamily] === "error",
+  );
+  const webFontStatus = (fontFamily: WebFontFamily) => {
+    const state = controls.fontLoadStates[fontFamily];
+    return state === "loading"
+      ? copy.loadingFont
+      : state === "ready"
+        ? copy.loadedFont
+        : state === "error"
+          ? copy.retryFont
+          : copy.loadFont;
+  };
+  const renderWebFontGroup = (
+    label: string,
+    fontFamilies: readonly WebFontFamily[],
+  ) => (
     <>
-      <span class="section-label">{copy.fontFamily}</span>
-      <ul class="font-list">
-        {FONT_OPTIONS.map((option) => {
-          const selected = option.value === controls.fontFamily;
+      <span class="font-group-label">{label}</span>
+      <ul class="font-list web-font-list">
+        {fontFamilies.map((fontFamily) => {
+          const definition = FONT_CATALOG[fontFamily];
+          const state = controls.fontLoadStates[fontFamily];
+          const selected = controls.fontFamily === fontFamily;
           return (
-            <li key={option.value}>
+            <li key={fontFamily}>
               <button
+                aria-busy={state === "loading"}
                 aria-pressed={selected}
-                class={`font-option font-${option.value}${selected ? " is-selected" : ""}`}
-                onClick={() => controls.onFontFamilyChange(option.value)}
+                class={`font-option web-font-option${selected ? " is-selected" : ""}`}
+                disabled={state === "loading"}
+                onClick={() => controls.onFontFamilyChange(fontFamily)}
                 type="button"
               >
-                <span>{copy[option.label]}</span>
-                {selected && <Icon name="check" size={16} />}
+                <span class="font-option-copy">
+                  <strong>{definition.displayName}</strong>
+                  {state === "ready" ? (
+                    <small style={{ fontFamily: resolveFontStack(fontFamily) }}>
+                      {definition.sample}
+                    </small>
+                  ) : null}
+                </span>
+                <span
+                  aria-live="polite"
+                  class={`font-load-status state-${state}`}
+                >
+                  {webFontStatus(fontFamily)}
+                </span>
               </button>
             </li>
           );
         })}
       </ul>
+    </>
+  );
+
+  return (
+    <>
+      <span class="section-label">{copy.fontFamily}</span>
+      <div aria-label={copy.fontFamily} class="font-tabs segmented" role="tablist">
+        <button
+          aria-controls="system-font-options"
+          aria-selected={fontTab === "system"}
+          class={fontTab === "system" ? "is-active" : ""}
+          id="system-font-tab"
+          onClick={() => setFontTab("system")}
+          role="tab"
+          type="button"
+        >
+          {copy.systemFonts}
+        </button>
+        <button
+          aria-controls="web-font-options"
+          aria-selected={fontTab === "web"}
+          class={fontTab === "web" ? "is-active" : ""}
+          id="web-font-tab"
+          onClick={() => setFontTab("web")}
+          role="tab"
+          type="button"
+        >
+          {copy.webFonts}
+        </button>
+      </div>
+
+      {fontTab === "system" ? (
+        <div
+          aria-labelledby="system-font-tab"
+          id="system-font-options"
+          role="tabpanel"
+        >
+          <ul class="font-list">
+            {FONT_OPTIONS.map((option) => {
+              const selected = option.value === controls.fontFamily;
+              return (
+                <li key={option.value}>
+                  <button
+                    aria-pressed={selected}
+                    class={`font-option font-${option.value}${selected ? " is-selected" : ""}`}
+                    onClick={() => controls.onFontFamilyChange(option.value)}
+                    type="button"
+                  >
+                    <span>{copy[option.label]}</span>
+                    {selected && <Icon name="check" size={16} />}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : (
+        <div
+          aria-labelledby="web-font-tab"
+          id="web-font-options"
+          role="tabpanel"
+        >
+          <p class="web-font-hint">{copy.webFontHint}</p>
+          {!controls.online ? (
+            <p class="warning-text" role="status">
+              {copy.offlineFontHint}
+            </p>
+          ) : fontLoadFailed ? (
+            <p class="warning-text" role="status">
+              {copy.fontErrorHint}
+            </p>
+          ) : null}
+          {renderWebFontGroup(
+            copy.traditionalChineseFonts,
+            WEB_FONT_FAMILIES.filter(
+              (fontFamily) => FONT_CATALOG[fontFamily].category === "traditional-chinese",
+            ),
+          )}
+          {renderWebFontGroup(
+            copy.latinFonts,
+            WEB_FONT_FAMILIES.filter(
+              (fontFamily) => FONT_CATALOG[fontFamily].category === "latin",
+            ),
+          )}
+        </div>
+      )}
 
       <div class="panel-divider" />
 
@@ -401,9 +557,13 @@ function FontPanel({ controls, copy }: { controls: FontPanelControls; copy: Copy
           <button
             aria-pressed={controls.fontWeight === weight.value}
             class={controls.fontWeight === weight.value ? "is-active" : ""}
+            disabled={!supportsFontWeight(controls.fontFamily, weight.value)}
             key={weight.value}
             onClick={() => controls.onFontWeightChange(weight.value)}
             style="min-height: 44px"
+            title={!supportsFontWeight(controls.fontFamily, weight.value)
+              ? copy.unavailableWeight
+              : undefined}
             type="button"
           >
             <span aria-hidden="true" style={`font-weight: ${weight.value}`}>{weight.value}</span>

@@ -1,0 +1,5 @@
+Montserrat
+Copyright 2011 The Montserrat Project Authors
+Package: @fontsource-variable/montserrat@5.3.0
+Source: https://github.com/JulietaUla/Montserrat
+License: SIL Open Font License 1.1; see ./OFL-1.1.txt

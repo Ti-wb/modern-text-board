@@ -1,0 +1,5 @@
+Noto Serif TC
+Copyright: Google Inc.
+Package: @fontsource-variable/noto-serif-tc@5.3.0
+Source: https://fonts.google.com/noto/specimen/Noto+Serif+TC
+License: SIL Open Font License 1.1; see ./OFL-1.1.txt

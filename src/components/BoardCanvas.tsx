@@ -2,6 +2,12 @@ import type { RefObject } from "preact";
 import { memo } from "preact/compat";
 import { useEffect, useMemo, useRef } from "preact/hooks";
 import type { BoardPageV2 } from "../domain/types";
+import {
+  FONT_CATALOG,
+  isWebFontFamily,
+  resolveFontStack,
+} from "../fonts/catalog";
+import { useFontRevision } from "../fonts/useFontRevision";
 import { useAutoFit } from "../hooks/useAutoFit";
 import { useCssMarqueeMotion } from "../hooks/useCssMarqueeMotion";
 import type { DisplayCadenceSnapshot } from "../hooks/useDisplayCadence";
@@ -29,6 +35,7 @@ interface BoardCanvasProps {
   onEdit: () => void;
   onNext: () => void;
   onPrevious: () => void;
+  onFontLoadError: () => void;
   onFitChange: (
     size: number,
     overflow: boolean,
@@ -36,13 +43,6 @@ interface BoardCanvasProps {
     fillReferenceSize: number,
   ) => void;
 }
-
-const fontClasses: Record<BoardPageV2["fontFamily"], string> = {
-  "system-sans": "font-system-sans",
-  "system-rounded": "font-system-rounded",
-  "system-serif": "font-system-serif",
-  "system-mono": "font-system-mono"
-};
 
 function BoardCanvasView({
   devicePixelRatio,
@@ -59,6 +59,7 @@ function BoardCanvasView({
   onEdit,
   onNext,
   onPrevious,
+  onFontLoadError,
   onFitChange
 }: BoardCanvasProps) {
   const textViewportRef = useRef<HTMLDivElement>(null);
@@ -74,6 +75,16 @@ function BoardCanvasView({
   const verticalMarquee = page.marquee.enabled && !horizontalMarquee;
   const canvasMarquee = page.marquee.enabled && marqueeEngine === "canvas";
   const workerMarquee = page.marquee.enabled && marqueeEngine === "worker";
+  const fontReadiness = useFontRevision({
+    fontFamily: page.fontFamily,
+    fontWeight: page.fontWeight,
+    onError: onFontLoadError,
+    text: displayText,
+  });
+  const renderFontFamily = isWebFontFamily(page.fontFamily) && !fontReadiness.ready
+    ? FONT_CATALOG[page.fontFamily].fallback
+    : page.fontFamily;
+  const fontStack = resolveFontStack(renderFontFamily);
   const mode = !page.marquee.enabled
     ? "static"
     : horizontalMarquee ? "horizontal" : "vertical";
@@ -92,7 +103,7 @@ function BoardCanvasView({
     scalePercent: page.fontScalePercent,
     mode,
     resizeKey: String(page.qr.enabled && Boolean(page.qr.payload)),
-    layoutKey: `${page.fontFamily}:${page.fontWeight}:${page.qr.enabled}`
+    layoutKey: `${renderFontFamily}:${page.fontWeight}:${fontReadiness.revision}:${page.qr.enabled}`
   });
 
   const { runtimeBudgetExceeded } = useMarqueeMotion({
@@ -154,13 +165,14 @@ function BoardCanvasView({
   const textStyle = useMemo(
     () => ({
       color: textColor,
+      fontFamily: fontStack,
       fontSize: `${fontSize}px`,
       fontWeight: String(page.fontWeight),
       textAlign: page.textAlign,
       width: verticalMarquee ? "100%" : undefined,
       maxWidth: verticalMarquee ? "100%" : undefined,
     }),
-    [fontSize, page.fontWeight, page.textAlign, textColor, verticalMarquee]
+    [fontSize, fontStack, page.fontWeight, page.textAlign, textColor, verticalMarquee]
   );
 
   const isInteractiveTarget = (target: EventTarget | null) =>
@@ -219,9 +231,9 @@ function BoardCanvasView({
         >
           <span
             aria-hidden="true"
-            class={`text-measure ${fontClasses[page.fontFamily]}`}
+            class="text-measure"
             ref={measureRef}
-            style={{ fontWeight: page.fontWeight }}
+            style={{ fontFamily: fontStack, fontWeight: page.fontWeight }}
           >
             {displayText}
           </span>
@@ -235,7 +247,8 @@ function BoardCanvasView({
                   devicePixelRatio={devicePixelRatio}
                   direction={page.marquee.direction}
                   flashEnabled={page.flashEnabled}
-                  fontFamily={page.fontFamily}
+                  fontFamily={renderFontFamily}
+                  fontRevision={fontReadiness.revision}
                   fontSize={fontSize}
                   fontWeight={page.fontWeight}
                   mirrored={page.mirrored}
@@ -252,7 +265,8 @@ function BoardCanvasView({
                   controllerRef={marqueeControllerRef}
                   direction={page.marquee.direction}
                   flashEnabled={page.flashEnabled}
-                  fontFamily={page.fontFamily}
+                  fontFamily={renderFontFamily}
+                  fontRevision={fontReadiness.revision}
                   fontSize={fontSize}
                   fontWeight={page.fontWeight}
                   mirrored={page.mirrored}
@@ -285,7 +299,7 @@ function BoardCanvasView({
                   }
                 >
                   <div class={page.mirrored ? "is-mirrored" : ""}>
-                    <p class={`display-text ${fontClasses[page.fontFamily]} ${horizontalMarquee ? "no-wrap" : ""}`}>
+                    <p class={`display-text ${horizontalMarquee ? "no-wrap" : ""}`}>
                       {displayText}
                     </p>
                   </div>

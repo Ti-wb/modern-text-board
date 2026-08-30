@@ -2,11 +2,11 @@
 
 A responsive, browser-based text board and handheld sign for phones, tablets, and laptops.
 
-Modern Text Board runs entirely in the browser. It needs no account, backend, analytics, or external font service, and it can work offline after the first successful load.
+Modern Text Board runs entirely in the browser. It needs no account, backend, analytics, or third-party runtime service, and it can work offline after the first successful load.
 
 ## Features
 
-- Large auto-fitting text with light and dark themes, system fonts, colors, weights, and alignment.
+- Large auto-fitting text with light and dark themes, system fonts, optional self-hosted open fonts, colors, weights, and alignment.
 - Four-direction marquee at roughly 24–600+ px/s, plus mirroring, flashing, and animation pause controls.
 - Local QR code generation and multi-page boards.
 - Touch, keyboard, fullscreen, and optional screen wake lock support.
@@ -14,6 +14,8 @@ Modern Text Board runs entirely in the browser. It needs no account, backend, an
 - Installable bilingual PWA with Traditional Chinese and English interfaces.
 
 > Board content is not persisted. Reloading or closing the page clears it.
+
+Optional fonts are served by this site from pinned Fontsource packages; the app never contacts Google Fonts. A font is downloaded only after you select it. Previously used glyph ranges can work offline once cached, but browsers may evict that cache and unseen glyphs fall back safely to a system font.
 
 ## Usage
 
@@ -67,4 +69,4 @@ Focused pull requests and [bug reports](https://github.com/Ti-wb/modern-text-boa
 
 ## License
 
-Licensed under [GNU GPLv3](./LICENSE) (`GPL-3.0-only`).
+Licensed under [GNU GPLv3](./LICENSE) (`GPL-3.0-only`). Bundled font files retain their separate [SIL Open Font License terms](./THIRD_PARTY_NOTICES.md).

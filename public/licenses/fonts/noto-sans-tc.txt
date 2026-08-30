@@ -1,0 +1,5 @@
+Noto Sans TC
+Copyright: Google Inc.
+Package: @fontsource-variable/noto-sans-tc@5.3.0
+Source: https://fonts.google.com/noto/specimen/Noto+Sans+TC
+License: SIL Open Font License 1.1; see ./OFL-1.1.txt

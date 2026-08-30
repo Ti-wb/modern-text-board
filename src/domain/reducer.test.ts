@@ -143,6 +143,42 @@ describe("workspaceReducer page settings", () => {
     expect(state.pages[0].fontWeight).toBe(700);
   });
 
+  it("changes family and real weight atomically", () => {
+    let state = workspace(createDefaultPage("one", "One"));
+    state = workspaceReducer(state, {
+      type: "page/set-typography",
+      pageId: "one",
+      fontFamily: "web-iansui",
+      fontWeight: 900,
+    });
+
+    expect(state.pages[0]).toMatchObject({
+      fontFamily: "web-iansui",
+      fontWeight: 400,
+    });
+
+    const unchanged = workspaceReducer(state, {
+      type: "page/toggle-bold",
+      pageId: "one",
+    });
+    expect(unchanged.pages[0].fontWeight).toBe(400);
+  });
+
+  it("chooses the nearest supported weight when a family changes", () => {
+    const page = createDefaultPage("one", "One");
+    page.fontWeight = 900;
+    const state = workspaceReducer(workspace(page), {
+      type: "page/set-font-family",
+      pageId: "one",
+      fontFamily: "web-lxgw-wenkai-tc",
+    });
+
+    expect(state.pages[0]).toMatchObject({
+      fontFamily: "web-lxgw-wenkai-tc",
+      fontWeight: 700,
+    });
+  });
+
   it("stores fractional marquee speeds and clamps the expanded range", () => {
     let state = workspace(createDefaultPage("one", "One"));
     state = workspaceReducer(state, {

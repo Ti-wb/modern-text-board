@@ -1,0 +1,6 @@
+Merriweather
+Copyright 2024 The Merriweather Project Authors
+Reserved Font Name: Merriweather
+Package: @fontsource-variable/merriweather@5.3.0
+Source: https://github.com/EbenSorkin/Merriweather4
+License: SIL Open Font License 1.1; see ./OFL-1.1.txt

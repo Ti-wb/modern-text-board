@@ -29,6 +29,7 @@
     "preview:clean": "vite preview --outDir dist/experiments/marquee-clean",
     "preview:probe": "vite preview --outDir dist/experiments/marquee-motion-probe",
     "check:bundle": "node scripts/check-bundle-size.mjs",
+    "check:fonts": "node scripts/check-font-assets.mjs",
     "preview": "vite preview",
     "lint": "eslint . --max-warnings=0",
     "test": "vitest run",
@@ -37,7 +38,7 @@
     "perf:ab": "node scripts/perf-ab.mjs",
     "perf:smoke": "node scripts/perf-smoke.mjs",
     "perf:accept": "node scripts/perf-accept.mjs",
-    "check": "npm run lint && npm run test && npm run build && npm run check:bundle"
+    "check": "npm run lint && npm run test && npm run build && npm run check:bundle && npm run check:fonts"
   },
   "dependencies": {
     "preact": "^10.29.8",
@@ -45,6 +46,15 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@fontsource-variable/inter": "5.3.0",
+    "@fontsource-variable/merriweather": "5.3.0",
+    "@fontsource-variable/montserrat": "5.3.0",
+    "@fontsource-variable/noto-sans-tc": "5.3.0",
+    "@fontsource-variable/noto-serif-tc": "5.3.0",
+    "@fontsource/iansui": "5.3.0",
+    "@fontsource/lato": "5.3.0",
+    "@fontsource/lxgw-wenkai-tc": "5.3.0",
+    "@fontsource/wdxl-lubrifont-tc": "5.3.0",
     "@playwright/test": "^1.62.1",
     "@preact/preset-vite": "^2.10.6",
     "@testing-library/preact": "^3.2.4",

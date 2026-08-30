@@ -19,7 +19,19 @@ import {
   createId
 } from "./domain/defaults";
 import { getActivePage, preferencesReducer, workspaceReducer } from "./domain/reducer";
-import type { Locale } from "./domain/types";
+import type {
+  FontFamily,
+  FontLoadState,
+  FontWeight,
+  Locale,
+  WebFontFamily,
+} from "./domain/types";
+import {
+  WEB_FONT_FAMILIES,
+  isWebFontFamily,
+  resolveSupportedFontWeight,
+} from "./fonts/catalog";
+import { ensureWebFontReady } from "./fonts/runtime";
 import type { MarqueeMotionController } from "./hooks/useMarqueeMotion";
 import {
   isMarqueeLabVisible,
@@ -40,6 +52,16 @@ import {
 type Overlay = "qr" | "pages" | "settings" | null;
 
 const TOOLBAR_IDLE_DELAY_MS = 10_000;
+
+function createInitialFontLoadStates(): Record<WebFontFamily, FontLoadState> {
+  return WEB_FONT_FAMILIES.reduce<Record<WebFontFamily, FontLoadState>>(
+    (states, fontFamily) => {
+      states[fontFamily] = "idle";
+      return states;
+    },
+    {} as Record<WebFontFamily, FontLoadState>,
+  );
+}
 
 interface ViewportMetrics {
   top: number;
@@ -127,9 +149,11 @@ export function App() {
   const [documentHidden, setDocumentHidden] = useState(document.visibilityState === "hidden");
   const [marqueeEngine, setMarqueeEngine] = useState(resolveMarqueeEngine);
   const [toast, setToast] = useState<{ message: string; error?: boolean } | null>(null);
+  const [fontLoadStates, setFontLoadStates] = useState(createInitialFontLoadStates);
   const idleTimerRef = useRef<number | null>(null);
   const dragStateRef = useRef<ToolbarDragState | null>(null);
   const marqueeControllerRef = useRef<MarqueeMotionController>(null);
+  const fontSelectionRequestRef = useRef(0);
   const toolbarIdleBlockedRef = useRef(false);
   const viewportRef = useRef(viewport);
   const page = getActivePage(workspace);
@@ -152,6 +176,77 @@ export function App() {
     setToast({ message, error });
     window.setTimeout(() => setToast((current) => current?.message === message ? null : current), 3600);
   }, []);
+
+  const notifyFontLoadError = useCallback(() => {
+    notify(
+      navigator.onLine
+        ? t("font.loadFailed")
+        : t("font.offlineUnavailable"),
+      true,
+    );
+  }, [notify, t]);
+
+  const setFontLoadState = useCallback((
+    fontFamily: WebFontFamily,
+    state: FontLoadState,
+  ) => {
+    setFontLoadStates((current) => current[fontFamily] === state
+      ? current
+      : { ...current, [fontFamily]: state });
+  }, []);
+
+  const requestTypography = useCallback((
+    fontFamily: FontFamily,
+    requestedWeight: FontWeight,
+  ) => {
+    const requestId = ++fontSelectionRequestRef.current;
+    const pageId = page.id;
+    const fontWeight = resolveSupportedFontWeight(
+      fontFamily,
+      requestedWeight,
+    );
+
+    if (!isWebFontFamily(fontFamily)) {
+      dispatchWorkspace({
+        type: "page/set-typography",
+        pageId,
+        fontFamily,
+        fontWeight,
+      });
+      return;
+    }
+
+    setFontLoadState(fontFamily, "loading");
+    void ensureWebFontReady(
+      fontFamily,
+      fontWeight,
+      page.text || t("canvas.placeholder"),
+    ).then(
+      () => {
+        setFontLoadState(fontFamily, "ready");
+        if (fontSelectionRequestRef.current !== requestId) return;
+        dispatchWorkspace({
+          type: "page/set-typography",
+          pageId,
+          fontFamily,
+          fontWeight,
+        });
+      },
+      () => {
+        setFontLoadState(fontFamily, "error");
+        if (fontSelectionRequestRef.current === requestId) {
+          notifyFontLoadError();
+        }
+      },
+    );
+  }, [notifyFontLoadError, page.id, page.text, setFontLoadState, t]);
+
+  const toggleBold = useCallback(() => {
+    requestTypography(
+      page.fontFamily,
+      page.fontWeight < 700 ? 700 : 400,
+    );
+  }, [page.fontFamily, page.fontWeight, requestTypography]);
 
   const closeTransientUi = useCallback(() => {
     if (editing) setEditing(false);
@@ -303,7 +398,7 @@ export function App() {
         event.preventDefault();
         setEditing(true);
       } else if (key === "b") {
-        dispatchWorkspace({ type: "page/toggle-bold", pageId: page.id });
+        toggleBold();
       } else if (key === "m") {
         dispatchWorkspace({
           type: "page/set-marquee-enabled",
@@ -323,7 +418,7 @@ export function App() {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [activateToolbar, closeTransientUi, editing, exitPresentation, overlay, page, panel, presentation, shortcutsOpen, togglePresentation]);
+  }, [activateToolbar, closeTransientUi, editing, exitPresentation, overlay, page, panel, presentation, shortcutsOpen, toggleBold, togglePresentation]);
 
   const finishToolbarDrag = useCallback((pointerId?: number) => {
     const drag = dragStateRef.current;
@@ -474,6 +569,7 @@ export function App() {
   };
 
   const resetAll = () => {
+    fontSelectionRequestRef.current += 1;
     const nextLocale: Locale = preferences.locale;
     const nextWorkspace = createDefaultWorkspace(nextLocale);
     const nextPreferences = createDefaultPreferences(nextLocale);
@@ -519,6 +615,7 @@ export function App() {
         marqueeControllerRef={marqueeControllerRef}
         marqueeEngine={marqueeEngine}
         onEdit={openEditor}
+        onFontLoadError={notifyFontLoadError}
         onFitChange={handleFitChange}
         onNext={showNextPage}
         onPrevious={showPreviousPage}
@@ -551,7 +648,7 @@ export function App() {
             onGripPointerDown={handleGripPointerDown}
             onGripLostPointerCapture={(event) => finishToolbarDrag(event.pointerId)}
             onHoverChange={setToolbarHovered}
-            onToggleBold={() => dispatchWorkspace({ type: "page/toggle-bold", pageId: page.id })}
+            onToggleBold={toggleBold}
             onTogglePanel={(kind) => {
               setOverlay(null);
               setPanel((current) => current === kind ? null : kind);
@@ -597,14 +694,22 @@ export function App() {
               maxFittingFontSizePx: maxFittingSize,
               effectiveFontSizePx: effectiveSize,
               fontWeight: page.fontWeight,
+              fontLoadStates,
+              online: pwa.online,
               fitOverflow,
-              onFontFamilyChange: (fontFamily) => dispatchWorkspace({ type: "page/set-font-family", pageId: page.id, fontFamily }),
+              onFontFamilyChange: (fontFamily) => requestTypography(
+                fontFamily,
+                page.fontWeight,
+              ),
               onFontScaleChange: (percent) => dispatchWorkspace({
                 type: "page/set-font-scale",
                 pageId: page.id,
                 percent,
               }),
-              onFontWeightChange: (fontWeight) => dispatchWorkspace({ type: "page/set-font-weight", pageId: page.id, fontWeight })
+              onFontWeightChange: (fontWeight) => requestTypography(
+                page.fontFamily,
+                fontWeight,
+              )
             }}
             kind={panel}
             locale={locale}

@@ -13,8 +13,8 @@ import type {
   MarqueeDirection,
   TextAlign,
 } from "../domain/types";
+import { resolveCanvasFontDeclaration } from "../fonts/catalog";
 import {
-  CANVAS_FONT_STACKS,
   CANVAS_MAX_BACKING_PIXELS,
   CANVAS_MAX_BITMAP_DIMENSION,
   CANVAS_MAX_VISIBLE_DIMENSION,
@@ -37,6 +37,7 @@ interface WorkerMarqueeProps {
   direction: MarqueeDirection;
   flashEnabled: boolean;
   fontFamily: FontFamily;
+  fontRevision: number;
   fontSize: number;
   fontWeight: FontWeight;
   mirrored: boolean;
@@ -69,14 +70,6 @@ function supportsWorkerCanvas(): boolean {
     "transferControlToOffscreen" in HTMLCanvasElement.prototype &&
     typeof createImageBitmap === "function"
   );
-}
-
-function fontDeclaration(
-  fontSize: number,
-  fontWeight: FontWeight,
-  fontFamily: FontFamily,
-): string {
-  return `${fontWeight} ${fontSize}px ${CANVAS_FONT_STACKS[fontFamily]}`;
 }
 
 function wrapLines(
@@ -134,7 +127,11 @@ async function rasterizeText({
   const measurementContext = measurement.getContext("2d");
   if (!measurementContext) throw new Error("Canvas text measurement unavailable");
 
-  const font = fontDeclaration(fontSize, fontWeight, fontFamily);
+  const font = resolveCanvasFontDeclaration(
+    fontFamily,
+    fontWeight,
+    fontSize,
+  );
   measurementContext.font = font;
   const horizontal = direction === "left" || direction === "right";
   const lineHeight = Math.max(1, fontSize * 1.06);
@@ -204,6 +201,7 @@ function WorkerSurface({
   direction,
   flashEnabled,
   fontFamily,
+  fontRevision,
   fontSize,
   fontWeight,
   mirrored,
@@ -263,6 +261,9 @@ function WorkerSurface({
   );
 
   const rebuild = useCallback(async () => {
+    // A completed glyph load changes this value and must invalidate the cached
+    // bitmap even when every visible typography property is otherwise equal.
+    void fontRevision;
     const runtime = runtimeRef.current;
     const worker = runtime.worker;
     const host = hostRef.current;
@@ -337,6 +338,7 @@ function WorkerSurface({
     direction,
     effectivePixelsPerSecond,
     fontFamily,
+    fontRevision,
     fontSize,
     fontWeight,
     mirrored,
@@ -479,6 +481,7 @@ export function WorkerMarquee(props: WorkerMarqueeProps) {
         direction={props.direction}
         flashEnabled={props.flashEnabled}
         fontFamily={props.fontFamily}
+        fontRevision={props.fontRevision}
         fontSize={props.fontSize}
         fontWeight={props.fontWeight}
         mirrored={props.mirrored}

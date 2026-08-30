@@ -104,6 +104,7 @@ function renderCanvasMarquee(
     direction: "left",
     flashEnabled: false,
     fontFamily: "system-sans",
+    fontRevision: 0,
     fontSize: 80,
     fontWeight: 900,
     mirrored: false,

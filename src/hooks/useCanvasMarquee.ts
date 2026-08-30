@@ -12,6 +12,7 @@ import type {
   MarqueeDirection,
   TextAlign,
 } from "../domain/types";
+import { resolveCanvasFontDeclaration } from "../fonts/catalog";
 import {
   calculateMarqueeGeometry,
   remapMarqueeProgress,
@@ -22,17 +23,6 @@ import {
 export const CANVAS_MAX_BACKING_PIXELS = 8_000_000;
 export const CANVAS_MAX_VISIBLE_DIMENSION = 8_192;
 export const CANVAS_MAX_BITMAP_DIMENSION = 16_384;
-
-export const CANVAS_FONT_STACKS: Readonly<Record<FontFamily, string>> = {
-  "system-sans":
-    'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif',
-  "system-rounded":
-    'ui-rounded, "SF Pro Rounded", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif',
-  "system-serif":
-    'ui-serif, "Songti TC", "PMingLiU", "Noto Serif CJK TC", Georgia, serif',
-  "system-mono":
-    'ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-};
 
 export interface CanvasMarqueeController {
   /** Update the live preview without committing workspace state. */
@@ -46,6 +36,7 @@ export interface UseCanvasMarqueeOptions {
   controllerRef?: RefObject<CanvasMarqueeController>;
   direction: MarqueeDirection;
   fontFamily: FontFamily;
+  fontRevision: number;
   fontSize: number;
   fontWeight: FontWeight;
   hostRef: RefObject<HTMLElement>;
@@ -157,14 +148,6 @@ export function resolveCanvasBackingScale(
   const byArea = Math.sqrt(Math.max(1, maximumPixels) / (width * height));
   const byDimension = Math.max(1, maximumDimension) / Math.max(width, height);
   return Math.max(0.0001, Math.min(scale, byArea, byDimension));
-}
-
-function fontDeclaration(
-  fontSize: number,
-  fontWeight: FontWeight,
-  fontFamily: FontFamily,
-): string {
-  return `${fontWeight} ${fontSize}px ${CANVAS_FONT_STACKS[fontFamily]}`;
 }
 
 function wrapCanvasLines(
@@ -400,6 +383,7 @@ export function useCanvasMarquee({
   controllerRef,
   direction,
   fontFamily,
+  fontRevision,
   fontSize,
   fontWeight,
   hostRef,
@@ -466,6 +450,9 @@ export function useCanvasMarquee({
   );
 
   const rebuild = useCallback(() => {
+    // A completed glyph load changes this value and must invalidate the cached
+    // bitmap even when every visible typography property is otherwise equal.
+    void fontRevision;
     const runtime = runtimeRef.current;
     const host = hostRef.current;
     const canvas = canvasRef.current;
@@ -485,7 +472,11 @@ export function useCanvasMarquee({
     canvas.height = Math.max(1, Math.floor(height * canvasScale));
     runtime.canvasScale = canvasScale;
 
-    const font = fontDeclaration(fontSize, fontWeight, fontFamily);
+    const font = resolveCanvasFontDeclaration(
+      fontFamily,
+      fontWeight,
+      fontSize,
+    );
     const measurementContext = runtime.measurementContext;
     if (!measurementContext) return;
     measurementContext.font = font;
@@ -547,6 +538,7 @@ export function useCanvasMarquee({
     direction,
     ensureAnimation,
     fontFamily,
+    fontRevision,
     fontSize,
     fontWeight,
     hostRef,

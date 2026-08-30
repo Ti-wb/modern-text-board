@@ -5,6 +5,7 @@ import {
   createDefaultPage,
   utf8ByteLength,
 } from "./defaults";
+import { resolveSupportedFontWeight } from "../fonts/catalog";
 import type {
   BoardPageV2,
   PreferencesAction,
@@ -192,11 +193,28 @@ export function workspaceReducer(
     }
 
     case "page/set-font-family":
-      return replacePage(workspace, action.pageId, (page) =>
-        page.fontFamily === action.fontFamily
+      return replacePage(workspace, action.pageId, (page) => {
+        const fontWeight = resolveSupportedFontWeight(
+          action.fontFamily,
+          page.fontWeight,
+        );
+        return page.fontFamily === action.fontFamily &&
+          page.fontWeight === fontWeight
           ? page
-          : { ...page, fontFamily: action.fontFamily },
-      );
+          : { ...page, fontFamily: action.fontFamily, fontWeight };
+      });
+
+    case "page/set-typography":
+      return replacePage(workspace, action.pageId, (page) => {
+        const fontWeight = resolveSupportedFontWeight(
+          action.fontFamily,
+          action.fontWeight,
+        );
+        return page.fontFamily === action.fontFamily &&
+          page.fontWeight === fontWeight
+          ? page
+          : { ...page, fontFamily: action.fontFamily, fontWeight };
+      });
 
     case "page/set-font-size": {
       if (!Number.isFinite(action.sizePx)) return workspace;
@@ -227,16 +245,23 @@ export function workspaceReducer(
     }
 
     case "page/set-font-weight":
-      return replacePage(workspace, action.pageId, (page) =>
-        page.fontWeight === action.fontWeight
+      return replacePage(workspace, action.pageId, (page) => {
+        const fontWeight = resolveSupportedFontWeight(
+          page.fontFamily,
+          action.fontWeight,
+        );
+        return page.fontWeight === fontWeight
           ? page
-          : { ...page, fontWeight: action.fontWeight },
-      );
+          : { ...page, fontWeight };
+      });
 
     case "page/toggle-bold":
       return replacePage(workspace, action.pageId, (page) => ({
         ...page,
-        fontWeight: page.fontWeight < 700 ? 700 : 400,
+        fontWeight: resolveSupportedFontWeight(
+          page.fontFamily,
+          page.fontWeight < 700 ? 700 : 400,
+        ),
       }));
 
     case "page/set-text-align":

@@ -798,6 +798,79 @@ html[data-presentation="true"] .page-indicator {
   justify-content: space-between;
 }
 
+.font-tabs {
+  margin-bottom: 8px;
+}
+
+.font-tabs button {
+  justify-content: center;
+}
+
+.web-font-hint {
+  margin: 8px 2px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.font-group-label {
+  display: block;
+  margin: 12px 2px 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.web-font-list + .font-group-label {
+  margin-top: 16px;
+}
+
+.web-font-option {
+  gap: 12px;
+}
+
+.font-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.font-option-copy strong,
+.font-option-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.font-option-copy strong {
+  font-size: 14px;
+}
+
+.font-option-copy small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.font-load-status {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.font-load-status.state-ready {
+  color: #72d68a;
+}
+
+.font-load-status.state-error {
+  color: #ff9f94;
+}
+
+.font-option:disabled,
+.segmented button:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
 .menu-row {
   justify-content: space-between;
   gap: 10px;
