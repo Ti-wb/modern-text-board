@@ -9,6 +9,7 @@ import {
 
 import { LIMITS, clamp } from "../domain/defaults";
 import type { MarqueeDirection } from "../domain/types";
+import type { MarqueeLoopMode } from "../marquee/engine";
 
 export const MARQUEE_BASE_PIXELS_PER_SECOND = 100;
 export const MARQUEE_RATE_FOLLOW_TIME_CONSTANT_MS = 52;
@@ -56,6 +57,7 @@ interface UseMarqueeMotionOptions {
   controllerRef?: RefObject<MarqueeMotionController>;
   devicePixelRatio?: number;
   refreshRateHz?: number;
+  loopMode?: MarqueeLoopMode;
 }
 
 interface MarqueeMotionState {
@@ -206,6 +208,50 @@ export function calculateMarqueeGeometry(
   };
 }
 
+/**
+ * Keep the existing constant-speed visible pass and two-copy phase offset, but
+ * return through a clipped region rather than teleporting at iteration end.
+ * Matching first/last transforms lets Chromium retain the raster across loops.
+ * A full font-size guard protects overhanging ink. Short copies without enough
+ * invisible time retain the original path; their speed/gap is never changed.
+ */
+export function createContinuousMarqueeKeyframes(
+  geometry: MarqueeGeometry,
+  viewportCrossExtent: number,
+  contentCrossExtent: number,
+  fontSize: number,
+): Keyframe[] | null {
+  const horizontal = geometry.direction === "left" || geometry.direction === "right";
+  const sign = geometry.direction === "left" || geometry.direction === "up" ? -1 : 1;
+  const start = horizontal ? geometry.startX : geometry.startY;
+  const cross = horizontal ? geometry.startY : geometry.startX;
+  const viewportExtent = geometry.copyGap / MARQUEE_COPY_GAP_RATIO;
+  const contentExtent = geometry.cycleDistance - geometry.copyGap;
+  const guard = Math.max(1, fontSize);
+  const exit = sign < 0 ? -contentExtent - guard : viewportExtent + guard;
+  const entry = start - sign * guard;
+  const firstOffset = Math.abs(exit - start) / geometry.distance;
+  const lastOffset = 1 - guard / geometry.distance;
+  const span = lastOffset - firstOffset;
+  if (!Number.isFinite(span) || span <= 0.000001) return null;
+  const outside = viewportCrossExtent + contentCrossExtent + guard;
+  if (!Number.isFinite(outside)) return null;
+  const points = [
+    [start, cross, 0],
+    [exit, cross, firstOffset],
+    [exit, outside, firstOffset + span / 3],
+    [entry, outside, firstOffset + span * 2 / 3],
+    [entry, cross, lastOffset],
+    [start, cross, 1],
+  ];
+  return points.map(([axis, crossAxis, offset]) => ({
+    offset,
+    transform: horizontal
+      ? `translate3d(${axis}px, ${crossAxis}px, 0)`
+      : `translate3d(${crossAxis}px, ${axis}px, 0)`,
+  }));
+}
+
 export function followPlaybackRate(
   currentRate: number,
   targetRate: number,
@@ -242,9 +288,12 @@ export function measureUntransformedLayoutBox(element: HTMLElement): {
   width: number;
   height: number;
 } {
+  // A cached ink canvas includes transparent overflow for accents. Measure the
+  // actual text so that padding cannot alter copy spacing or loop duration.
+  const content = element.querySelector<HTMLElement>(".display-text") ?? element;
   return {
-    width: Math.max(1, element.clientWidth, element.offsetWidth, element.scrollWidth),
-    height: Math.max(1, element.clientHeight, element.offsetHeight, element.scrollHeight),
+    width: Math.max(1, element.clientWidth, element.offsetWidth, content.scrollWidth),
+    height: Math.max(1, element.clientHeight, element.offsetHeight, content.scrollHeight),
   };
 }
 
@@ -334,6 +383,7 @@ function setGeometryProperties(
 }
 
 function removeGeometryProperties(element: HTMLElement): void {
+  delete element.dataset.marqueeLoop;
   element.style.removeProperty("--marquee-start-x");
   element.style.removeProperty("--marquee-start-y");
   element.style.removeProperty("--marquee-end-x");
@@ -358,11 +408,13 @@ export function useMarqueeMotion({
   controllerRef,
   devicePixelRatio = window.devicePixelRatio || 1,
   refreshRateHz = 60,
+  loopMode = "linear",
 }: UseMarqueeMotionOptions): MarqueeMotionState {
   const [runtimeBudgetExceeded, setRuntimeBudgetExceeded] = useState(false);
   const animationsRef = useRef<Animation[]>([]);
   const geometryRef = useRef<MarqueeGeometry | null>(null);
   const geometryKeyRef = useRef("");
+  const pathKeyRef = useRef("");
   const rebuildFrameRef = useRef<number | null>(null);
   const rateFrameRef = useRef<number | null>(null);
   const currentRateRef = useRef(1);
@@ -451,6 +503,7 @@ export function useMarqueeMotion({
     // Input events only move the target. One persistent follower keeps its
     // current velocity, so rapid slider updates cannot restart the easing.
     if (rateFrameRef.current !== null) return;
+    if (Math.abs(currentRateRef.current - targetRateRef.current) < 0.000001) return;
     const update = (now: number) => {
       if (
         animationsRef.current.length !== animations.length ||
@@ -555,10 +608,14 @@ export function useMarqueeMotion({
       );
       nextGeometry.endX = nextGeometry.startX;
     }
-    const nextGeometryKey = `${animationKey}:${direction}`;
+    const nextGeometryKey = `${animationKey}:${direction}:${loopMode}`;
+    const nextPathKey = loopMode === "continuous"
+      ? `${viewportBox.width}:${viewportBox.height}:${contentBox.width}:${contentBox.height}:${fontSize}`
+      : "";
     if (
       geometryRef.current &&
       geometryKeyRef.current === nextGeometryKey &&
+      pathKeyRef.current === nextPathKey &&
       sameGeometry(geometryRef.current, nextGeometry, devicePixelRatio)
     ) {
       return;
@@ -586,6 +643,7 @@ export function useMarqueeMotion({
     cancelAnimations();
     geometryRef.current = nextGeometry;
     geometryKeyRef.current = nextGeometryKey;
+    pathKeyRef.current = nextPathKey;
     setGeometryProperties(moving, nextGeometry);
 
     const targetRate = resolveAdaptiveMarqueeSpeed(
@@ -601,6 +659,7 @@ export function useMarqueeMotion({
       typeof secondaryCopy.animate !== "function"
     ) {
       moving.classList.add("uses-css-marquee");
+      moving.dataset.marqueeLoop = "linear";
       applyFallbackSpeed();
       return;
     }
@@ -608,7 +667,14 @@ export function useMarqueeMotion({
     moving.classList.remove("uses-css-marquee");
     const created: Animation[] = [];
     try {
-      const keyframes: Keyframe[] = [
+      const continuous = loopMode === "continuous" ? createContinuousMarqueeKeyframes(
+        nextGeometry,
+        direction === "left" || direction === "right" ? viewportBox.height : viewportBox.width,
+        direction === "left" || direction === "right" ? contentBox.height : contentBox.width,
+        fontSize,
+      ) : null;
+      moving.dataset.marqueeLoop = continuous ? "continuous" : "linear";
+      const keyframes: Keyframe[] = continuous ?? [
         {
           transform: `translate3d(${nextGeometry.startX}px, ${nextGeometry.startY}px, 0)`,
         },
@@ -643,6 +709,7 @@ export function useMarqueeMotion({
       created.forEach((animation) => animation.cancel());
       animationsRef.current = [];
       moving.classList.add("uses-css-marquee");
+      moving.dataset.marqueeLoop = "linear";
       applyFallbackSpeed();
     }
   }, [
@@ -653,6 +720,8 @@ export function useMarqueeMotion({
     direction,
     devicePixelRatio,
     enabled,
+    fontSize,
+    loopMode,
     movingRef,
     primaryCopyRef,
     secondaryCopyRef,

@@ -326,7 +326,13 @@ test("marquee speed changes continuously without moving the current frame", asyn
     ),
   );
   expect(finalRates).toHaveLength(2);
-  finalRates.forEach((rate) => expect(rate).toBeCloseTo(4.8, 1));
+  // Speed 37.5 requests about 575.56 px/s; the current physical-pixel
+  // alignment allows at most 3% reduction. The old 480 px/s cap is obsolete.
+  finalRates.forEach((rate) => {
+    expect(rate * 100).toBeGreaterThanOrEqual(575.55 * 0.97);
+    expect(rate * 100).toBeLessThanOrEqual(575.56);
+  });
+  expect(finalRates[0]).toBeCloseTo(finalRates[1], 6);
 });
 
 test("marquee speed preview keeps the board state untouched until release", async ({

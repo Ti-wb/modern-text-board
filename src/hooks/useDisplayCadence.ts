@@ -157,10 +157,10 @@ export function useDisplayCadence({
 }: UseDisplayCadenceOptions = {}): DisplayCadenceSnapshot {
   const [snapshot, setSnapshot] = useState(MEASURING_SNAPSHOT);
   const lastStableRef = useRef<DisplayCadenceSnapshot | null>(null);
+  const measureRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     let animationFrameId: number | null = null;
-    let recalibrationTimerId: number | null = null;
     let resolutionQuery: MediaQueryList | null = null;
     let previousTimestamp: number | null = null;
     let attemptCount = 0;
@@ -245,12 +245,16 @@ export function useDisplayCadence({
           frameIntervals.push(interval);
         }
 
-        const estimate = estimateDisplayCadence(frameIntervals);
-        if (estimate.status === "stable") {
-          publishStable(estimate);
-          stopLongTaskObserver();
-          previousTimestamp = null;
-          return;
+        // Fewer than 48 intervals cannot produce an estimate. Avoid sorting
+        // and allocating copies of the growing buffer on those early frames.
+        if (frameIntervals.length >= DISPLAY_CADENCE_SAMPLE_COUNT && !overlappedLongTask) {
+          const estimate = estimateDisplayCadence(frameIntervals);
+          if (estimate.status === "stable") {
+            publishStable(estimate);
+            stopLongTaskObserver();
+            previousTimestamp = null;
+            return;
+          }
         }
         if (attemptCount >= DISPLAY_CADENCE_MAX_ATTEMPTS) {
           finishWithoutStableEstimate();
@@ -307,20 +311,13 @@ export function useDisplayCadence({
     window.addEventListener("orientationchange", handleDisplayChange);
     window.visualViewport?.addEventListener("resize", handleDisplayChange);
     window.screen.orientation?.addEventListener("change", handleDisplayChange);
-    if (active) {
-      recalibrationTimerId = window.setInterval(
-        startMeasurement,
-        DISPLAY_CADENCE_RECALIBRATION_MS,
-      );
-    }
+    measureRef.current = startMeasurement;
     startMeasurement();
 
     return () => {
       disposed = true;
       stopSampling();
-      if (recalibrationTimerId !== null) {
-        window.clearInterval(recalibrationTimerId);
-      }
+      measureRef.current = () => undefined;
       longTaskObserver?.disconnect();
       resolutionQuery?.removeEventListener("change", handleResolutionChange);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -334,6 +331,14 @@ export function useDisplayCadence({
         handleDisplayChange,
       );
     };
+  }, []);
+
+  // Editing/pausing only changes the periodic timer. It must not restart the
+  // display observer and a fresh calibration on each interaction.
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => measureRef.current(), DISPLAY_CADENCE_RECALIBRATION_MS);
+    return () => window.clearInterval(timer);
   }, [active]);
 
   return snapshot;

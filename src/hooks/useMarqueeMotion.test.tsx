@@ -5,9 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { LIMITS } from "../domain/defaults";
 import {
   calculateMarqueeGeometry,
+  createContinuousMarqueeKeyframes,
   followPlaybackRate,
   MARQUEE_BASE_PIXELS_PER_SECOND,
   MARQUEE_COPY_GAP_RATIO,
+  measureUntransformedLayoutBox,
   remapMarqueeProgress,
   resolveAdaptiveMarqueeSpeed,
   snapMarqueeCrossAxis,
@@ -57,6 +59,56 @@ function MotionHarness({
 }
 
 describe("marquee motion math", () => {
+  it("excludes cached ink overflow from the motion geometry", () => {
+    const copy = document.createElement("div");
+    const text = document.createElement("p");
+    text.className = "display-text";
+    copy.append(text, document.createElement("canvas"));
+    Object.defineProperties(copy, {
+      clientWidth: { value: 100 }, offsetWidth: { value: 100 }, scrollWidth: { value: 180 },
+      clientHeight: { value: 85 }, offsetHeight: { value: 85 }, scrollHeight: { value: 165 },
+    });
+    Object.defineProperties(text, { scrollWidth: { value: 100 }, scrollHeight: { value: 85 } });
+    expect(measureUntransformedLayoutBox(copy)).toEqual({ width: 100, height: 85 });
+  });
+  it.each(["left", "right", "up", "down"] as const)(
+    "keeps the visible %s pass identical while returning outside the viewport",
+    (direction) => {
+      const horizontal = direction === "left" || direction === "right";
+      const geometry = calculateMarqueeGeometry(direction, 800, 600, 400, 400);
+      const frames = createContinuousMarqueeKeyframes(geometry, horizontal ? 600 : 800, 400, 50)!;
+      expect(frames).toHaveLength(6);
+      expect(frames[0].transform).toBe(frames.at(-1)!.transform);
+      const points = frames.map((frame) => ({
+        offset: Number(frame.offset),
+        position: String(frame.transform).match(/translate3d\(([-\d.]+)px, ([-\d.]+)px, 0\)/)!.slice(1).map(Number),
+      }));
+      const visible = ([x, y]: number[]) => x < 800 && x + 400 > 0 && y < 600 && y + 400 > 0;
+      for (let step = 0; step < 1000; step += 1) {
+        const progress = step / 1000;
+        const end = points.findIndex((point) => point.offset > progress);
+        const from = points[end - 1];
+        const to = points[end];
+        const portion = (progress - from.offset) / (to.offset - from.offset);
+        const actual = from.position.map((value, axis) => value + (to.position[axis] - value) * portion);
+        const original = [
+          geometry.startX + (geometry.endX - geometry.startX) * progress,
+          geometry.startY + (geometry.endY - geometry.startY) * progress,
+        ];
+        expect(visible(actual)).toBe(visible(original));
+        if (visible(original)) {
+          expect(actual[0]).toBeCloseTo(original[0], 8);
+          expect(actual[1]).toBeCloseTo(original[1], 8);
+        }
+      }
+    },
+  );
+
+  it("retains the original path when ink guards leave insufficient invisible travel", () => {
+    const geometry = calculateMarqueeGeometry("left", 800, 600, 100, 80);
+    expect(createContinuousMarqueeKeyframes(geometry, 600, 80, 80)).toBeNull();
+  });
+
   it("preserves legacy speeds while extending the range beyond 600 px/s", () => {
     expect(speedToPixelsPerSecond(1)).toBe(24);
     expect(speedToPixelsPerSecond(10)).toBe(160);

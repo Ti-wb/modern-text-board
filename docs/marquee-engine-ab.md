@@ -1,6 +1,10 @@
 # Marquee Engine A/B Validation
 
+> 2026-09-07 的 WAAPI 文字快取、日常情境量測及比較方式見 [日常跑馬燈效能](./marquee-daily-performance.md)。以下保留引擎 A/B 的歷史紀錄。
+
 此文件記錄 CSS Animation、HTML Canvas 2D 與 Worker OffscreenCanvas 跑馬燈候選的測試方式。實驗完成前，沒有 query parameter 的正式行為仍使用 WAAPI。
+
+針對每 5–10 秒的高速微頓，請使用 [週期性微頓診斷流程](marquee-stutter-investigation.md)：新增有視窗實機模式、120 秒取樣、原始 trace、分離 DrawFrame 推估與呈現回饋，以及逐輪交錯的 A/B。以下舊量測表保留為歷史紀錄，不能與新版 frame source 直接混比。Renderer 本身沒有持續 rAF，不代表完整 App 完全沒有背景工作；目前 App 仍會在播放時每 60 秒重新校準 cadence。
 
 ## Production 測試網址
 

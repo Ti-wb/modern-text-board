@@ -10,12 +10,13 @@ import {
 import { useFontRevision } from "../fonts/useFontRevision";
 import { useAutoFit } from "../hooks/useAutoFit";
 import { useCssMarqueeMotion } from "../hooks/useCssMarqueeMotion";
+import { useMarqueeInk } from "../hooks/useMarqueeInk";
 import type { DisplayCadenceSnapshot } from "../hooks/useDisplayCadence";
 import {
   useMarqueeMotion,
   type MarqueeMotionController,
 } from "../hooks/useMarqueeMotion";
-import type { MarqueeEngineKind } from "../marquee/engine";
+import { resolveMarqueeInk, resolveMarqueeLoop, type MarqueeEngineKind } from "../marquee/engine";
 import { CanvasMarquee } from "./CanvasMarquee";
 import { QrDisplay } from "./QrDisplay";
 import { WorkerMarquee } from "./WorkerMarquee";
@@ -108,6 +109,7 @@ function BoardCanvasView({
 
   const { runtimeBudgetExceeded } = useMarqueeMotion({
     animationKey: page.id,
+    loopMode: resolveMarqueeLoop(),
     direction: page.marquee.direction,
     devicePixelRatio,
     enabled:
@@ -143,6 +145,15 @@ function BoardCanvasView({
   });
   const marqueeSuppressed = page.marquee.enabled &&
     (marqueeBudgetExceeded || runtimeBudgetExceeded);
+
+  useMarqueeInk({
+    enabled: page.marquee.enabled && marqueeEngine === "waapi" && !marqueeSuppressed &&
+      resolveMarqueeInk() === "cached",
+    movingRef,
+    dpr: devicePixelRatio,
+    revision: JSON.stringify([displayText, fontSize, fontStack, page.fontWeight,
+      fontReadiness.revision, page.textAlign, page.textColor, page.theme, horizontalMarquee]),
+  });
 
   useEffect(
     () => onFitChange(
@@ -298,7 +309,7 @@ function BoardCanvasView({
                       : undefined
                   }
                 >
-                  <div class={page.mirrored ? "is-mirrored" : ""}>
+                  <div class={`marquee-ink ${page.mirrored ? "is-mirrored" : ""}`}>
                     <p class={`display-text ${horizontalMarquee ? "no-wrap" : ""}`}>
                       {displayText}
                     </p>

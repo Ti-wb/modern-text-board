@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { isMarqueeLabVisible, resolveMarqueeEngine } from "./engine";
+import { isMarqueeLabVisible, resolveMarqueeEngine, resolveMarqueeInk, resolveMarqueeLoop } from "./engine";
 
 describe("marquee engine selection", () => {
+  it("uses cached ink by default and preserves an explicit native comparison", () => {
+    expect(resolveMarqueeInk("")).toBe("cached");
+    expect(resolveMarqueeInk("?marquee-raster=1")).toBe("cached");
+    expect(resolveMarqueeInk("?marquee-raster=0")).toBe("native");
+  });
+  it("enables the continuous return only with its explicit experimental query", () => {
+    expect(resolveMarqueeLoop("")).toBe("linear");
+    expect(resolveMarqueeLoop("?marquee-loop=unknown")).toBe("linear");
+    expect(resolveMarqueeLoop("?marquee-loop=continuous")).toBe("continuous");
+  });
   it("keeps WAAPI as the production default", () => {
     expect(resolveMarqueeEngine("")).toBe("waapi");
     expect(resolveMarqueeEngine("?marquee-engine=unknown")).toBe("waapi");

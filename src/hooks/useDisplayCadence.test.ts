@@ -240,4 +240,18 @@ describe("useDisplayCadence lifecycle", () => {
     expect(frames.pendingCount()).toBe(0);
     active.unmount();
   });
+
+  it("keeps the stable sample when playback is toggled during editing", () => {
+    const frames = installFakeAnimationFrames();
+    const { rerender, result } = renderHook(({ active }) => useDisplayCadence({ active }), {
+      initialProps: { active: true },
+    });
+    frames.flushStableCadence(120);
+    const requests = frames.requestCount();
+    rerender({ active: false });
+    rerender({ active: true });
+    expect(result.current.refreshRateHz).toBe(120);
+    expect(frames.requestCount()).toBe(requests);
+    expect(frames.pendingCount()).toBe(0);
+  });
 });

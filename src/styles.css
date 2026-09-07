@@ -237,6 +237,10 @@ html[data-presentation="true"] .page-indicator {
   will-change: transform;
 }
 
+.marquee-ink {
+  position: relative;
+}
+
 .moving-text.is-marquee-suppressed .marquee-copy {
   contain: layout style;
   will-change: auto;
