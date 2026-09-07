@@ -3,6 +3,7 @@ dist/
 coverage/
 playwright-report/
 test-results/
+perf-results/
 .modern-text-board.git/
 *.tsbuildinfo
 .DS_Store
